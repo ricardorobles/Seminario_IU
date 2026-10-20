@@ -1,178 +1,217 @@
 
-const ALLOWED_ORIGIN = "https://ricardorobles.github.io";
+/**
+ * SEMINARIO IU - CLOUDFLARE WORKER V37
+ *
+ * Recibe entregas JSON desde GitHub Pages
+ * y las envía a Google Apps Script.
+ *
+ * Endpoint:
+ * https://seminario-iu.rrobles-c2d.workers.dev/entregas
+ *
+ * Secrets requeridos en Cloudflare:
+ * APPS_SCRIPT_URL
+ * APPS_SCRIPT_TOKEN
+ */
+
+const ORIGIN = "https://ricardorobles.github.io";
 const MAX_BYTES = 9 * 1024 * 1024;
 
 export default {
   async fetch(request, env) {
+
+    const headers = {
+      "Access-Control-Allow-Origin": ORIGIN,
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Max-Age": "86400",
+      "Vary": "Origin",
+      "Cache-Control": "no-store"
+    };
+
+    const reply = (obj, status = 200) =>
+      new Response(JSON.stringify(obj), {
+        status,
+        headers: {
+          ...headers,
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      });
+
     const url = new URL(request.url);
     const origin = request.headers.get("Origin");
 
-    const corsHeaders = {
-      "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, X-Submission-Key",
-      "Access-Control-Max-Age": "86400",
-      "Vary": "Origin"
-    };
-
-    function json(data, status = 200) {
-      return new Response(JSON.stringify(data), {
-        status,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json; charset=utf-8",
-          "Cache-Control": "no-store"
-        }
-      });
+    // Comprobar origen autorizado
+    if (origin && origin !== ORIGIN) {
+      return reply({
+        ok: false,
+        error: "Origen no autorizado"
+      }, 403);
     }
 
-    // Responder al preflight antes de procesar la entrega.
+    // Resolver CORS antes del POST
     if (request.method === "OPTIONS") {
-      if (origin && origin !== ALLOWED_ORIGIN) {
-        return json({ ok: false, error: "Origen no autorizado" }, 403);
-      }
-
       return new Response(null, {
         status: 204,
-        headers: corsHeaders
+        headers
       });
     }
 
-    if (origin && origin !== ALLOWED_ORIGIN) {
-      return json({ ok: false, error: "Origen no autorizado" }, 403);
-    }
-
+    // Verificar funcionamiento del Worker
     if (url.pathname === "/" && request.method === "GET") {
-      return json({
+      return reply({
         ok: true,
         service: "seminario-iu",
-        version: "cors-fix-1",
+        version: "v37-json",
         endpoint: "/entregas"
       });
     }
 
-    if (url.pathname === "/entregas" && request.method === "GET") {
-      return json({
-        ok: true,
-        service: "seminario-iu",
-        status: "Endpoint disponible",
-        method: "POST"
-      });
-    }
-
+    // Comprobar ruta
     if (url.pathname !== "/entregas") {
-      return json({ ok: false, error: "Ruta inexistente" }, 404);
+      return reply({
+        ok: false,
+        error: "Ruta inexistente"
+      }, 404);
     }
 
     if (request.method !== "POST") {
-      return json({ ok: false, error: "Método no permitido" }, 405);
+      return reply({
+        ok: false,
+        error: "Usá POST"
+      }, 405);
     }
 
+    // Verificar configuración de Apps Script
     if (!env.APPS_SCRIPT_URL || !env.APPS_SCRIPT_TOKEN) {
-      return json({
+      return reply({
         ok: false,
         error: "Faltan los secretos de Apps Script"
       }, 503);
     }
 
-    if (
-      env.SUBMISSION_KEY &&
-      request.headers.get("X-Submission-Key") !== env.SUBMISSION_KEY
-    ) {
-      return json({
-        ok: false,
-        error: "Clave de entrega incorrecta"
-      }, 401);
-    }
-
-    const contentLength = Number(
+    // Comprobar tamaño del archivo
+    const length = Number(
       request.headers.get("Content-Length") || 0
     );
 
-    if (contentLength > MAX_BYTES) {
-      return json({
+    if (length > MAX_BYTES) {
+      return reply({
         ok: false,
-        error: "La entrega supera el tamaño máximo"
+        error: "Archivo demasiado grande"
       }, 413);
     }
 
-    let raw;
-    let data;
+    let body;
 
     try {
-      raw = await request.text();
+      const raw = await request.text();
 
-      if (new TextEncoder().encode(raw).byteLength > MAX_BYTES) {
-        return json({
+      if (
+        new TextEncoder().encode(raw).byteLength > MAX_BYTES
+      ) {
+        return reply({
           ok: false,
-          error: "La entrega supera el tamaño máximo"
+          error: "Archivo demasiado grande"
         }, 413);
       }
 
-      data = JSON.parse(raw);
-    } catch (error) {
-      return json({
+      body = JSON.parse(raw);
+
+    } catch {
+      return reply({
         ok: false,
-        error: "No se pudo leer el JSON"
+        error: "JSON inválido"
       }, 400);
     }
 
+    // Validar identificador único
     if (
-      !/^[A-Za-z0-9_-]{12,80}$/.test(String(data.id || ""))
-    ) {
-      return json({ ok: false, error: "ID inválido" }, 400);
-    }
-
-    if (
-      typeof data.html !== "string" ||
-      !/^<!doctype html>/i.test(data.html.trim())
-    ) {
-      return json({ ok: false, error: "HTML inválido" }, 400);
-    }
-
-    if (
-      !/^[A-Za-z0-9_.-]{1,230}\.pdf$/i.test(
-        String(data.filename || "")
+      !/^[A-Za-z0-9_-]{12,80}$/.test(
+        String(body.id || "")
       )
     ) {
-      return json({ ok: false, error: "Nombre inválido" }, 400);
+      return reply({
+        ok: false,
+        error: "ID inválido"
+      }, 400);
     }
 
-    try {
-      const response = await fetch(env.APPS_SCRIPT_URL, {
-        method: "POST",
-        redirect: "follow",
-        headers: {
-          "Content-Type": "text/plain;charset=UTF-8"
-        },
-        body: JSON.stringify({
-          ...data,
-          token: env.APPS_SCRIPT_TOKEN
-        })
-      });
+    // Validar nombre de archivo JSON
+    if (
+      !/^[A-Za-z0-9_.-]{1,230}\.json$/i.test(
+        String(body.filename || "")
+      )
+    ) {
+      return reply({
+        ok: false,
+        error: "Nombre de archivo inválido"
+      }, 400);
+    }
 
-      const text = await response.text();
+    // Validar estructura del borrador
+    if (
+      !body.draft ||
+      typeof body.draft !== "object" ||
+      Array.isArray(body.draft) ||
+      !body.draft.fields ||
+      !Array.isArray(body.draft.images)
+    ) {
+      return reply({
+        ok: false,
+        error: "Borrador incompleto"
+      }, 400);
+    }
+
+    // Comprobar coherencia de metadatos
+    if (
+      body.draft.exportId !== body.id ||
+      body.draft.fileName !== body.filename
+    ) {
+      return reply({
+        ok: false,
+        error: "Metadatos inconsistentes"
+      }, 400);
+    }
+
+    // Enviar JSON a Google Apps Script
+    try {
+      const response = await fetch(
+        env.APPS_SCRIPT_URL,
+        {
+          method: "POST",
+          redirect: "follow",
+          headers: {
+            "Content-Type": "text/plain;charset=UTF-8"
+          },
+          body: JSON.stringify({
+            ...body,
+            token: env.APPS_SCRIPT_TOKEN
+          })
+        }
+      );
+
+      const raw = await response.text();
 
       let result;
 
       try {
-        result = JSON.parse(text);
+        result = JSON.parse(raw);
       } catch {
-        return json({
+        return reply({
           ok: false,
           error: "Apps Script no devolvió JSON válido"
         }, 502);
       }
 
-      return json(
+      return reply(
         result,
         response.ok && result.ok ? 200 : 502
       );
 
     } catch (error) {
-      return json({
+      return reply({
         ok: false,
-        error: "Error de comunicación con Apps Script: " +
+        error: "Error al contactar Apps Script: " +
           String(error.message || error)
       }, 502);
     }
