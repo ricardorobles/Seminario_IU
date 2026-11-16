@@ -66,6 +66,28 @@ export default {
       });
     }
 
+    // Panel de docentes: todas las operaciones pasan por Apps Script,
+    // que vuelve a validar la sesión y el permiso para cada entrega.
+    if (url.pathname === "/docentes") {
+      if (request.method !== "POST") return reply({ok:false,error:"Usá POST"},405);
+      if (!env.APPS_SCRIPT_URL || !env.APPS_SCRIPT_TOKEN) return reply({ok:false,error:"Faltan secretos"},503);
+      const length=Number(request.headers.get("Content-Length")||0);
+      if(length>150000) return reply({ok:false,error:"Solicitud demasiado grande"},413);
+      try {
+        const raw=await request.text();
+        if(new TextEncoder().encode(raw).byteLength>150000)return reply({ok:false,error:"Solicitud demasiado grande"},413);
+        const body=JSON.parse(raw);
+        const actions=["login","logout","list","get","saveCorrection"];
+        if(!body||!actions.includes(body.action))return reply({ok:false,error:"Acción inválida"},400);
+        const response=await fetch(env.APPS_SCRIPT_URL,{
+          method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=UTF-8"},
+          body:JSON.stringify({...body,token:env.APPS_SCRIPT_TOKEN})
+        });
+        const result=JSON.parse(await response.text());
+        return reply(result,response.ok&&result.ok?200:400);
+      }catch(error){return reply({ok:false,error:"Error en acceso docente: "+String(error.message||error)},502);}
+    }
+
     // Comprobar ruta
     if (url.pathname !== "/entregas") {
       return reply({
