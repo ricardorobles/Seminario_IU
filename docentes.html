@@ -24,7 +24,7 @@
 #bib .bib-row .bib-fill{background:#b1542a;height:100%}
 #bib .bib-row:hover .bib-fill{background:#8b3619}
 #bib .bib-row.selected .bib-fill{background:#226f7d}
-.bib-tooltip{position:fixed;z-index:7000;pointer-events:none;background:#183540;color:white;padding:10px 12px;border-radius:8px;max-width:min(400px,85vw);font-size:11px;line-height:1.5;box-shadow:0 4px 20px #0003;white-space:normal;overflow-wrap:anywhere}
+.bib-tooltip{position:fixed;z-index:7000;pointer-events:none;background:#183540;color:white;padding:8px 10px;border-radius:7px;width:max-content;max-width:min(275px,75vw);max-height:min(175px,45vh);overflow:hidden;font-size:10px;line-height:1.45;box-shadow:0 4px 20px #0003;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
 .bib-tooltip[hidden]{display:none}
 #cloud{position:relative;height:315px;background:white;overflow:hidden;border-radius:8px}
 .cloud-packed{position:relative;width:100%;height:100%}
@@ -119,7 +119,7 @@ async function loadIndex(){
 function effectiveGroup(w){return groupNum(states[w.id]?.groupOverride ?? w.group)}
 function compareGrades(a,b,desc){const av=Number(states[a.id]?.grade),bv=Number(states[b.id]?.grade),ag=av>=1&&av<=10?av:null,bg=bv>=1&&bv<=10?bv:null;if(ag===null&&bg===null)return a.student.localeCompare(b.student,'es');if(ag===null)return 1;if(bg===null)return -1;return (desc?bv-av:av-bv)||a.student.localeCompare(b.student,'es')}
 function updateGroups(){const t=$('teacher').value,old=$('group').value;const groups=[...new Set(allWorks.filter(w=>!t||w.commission===t).map(w=>effectiveGroup(w)).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));$('group').innerHTML='<option value="">Todos los grupos</option>'+groups.map(g=>`<option value="${esc(g)}">${esc(g)}</option>`).join('');if(groups.includes(old))$('group').value=old;}
-function visible(){const f=filters(),q=norm(f.search);return allWorks.filter(w=>(!f.teacher||w.commission===f.teacher)&&(!f.group||effectiveGroup(w)===f.group)&&(!f.status||(states[w.id]?.status||'pendiente')===f.status)&&(!bibChoice||w.bibliography.some(b=>norm(b)===bibChoice))&&(!wordChoice||String(w.title||'').split(/[^\p{L}]+/u).some(x=>wordCanonical(x)===wordChoice))&&norm([w.student,w.title,w.commission,w.cases.map(c=>c.name).join(' ')].join(' ')).includes(q)).sort((a,b)=>f.sort==='date'?b.modified-a.modified:f.sort==='title'?a.title.localeCompare(b.title,'es'):f.sort==='grade_desc'||f.sort==='grade_asc'?compareGrades(a,b,f.sort==='grade_desc') : a.student.localeCompare(b.student,'es'))}
+function visible(){const f=filters(),q=norm(f.search);return allWorks.filter(w=>(!f.teacher||w.commission===f.teacher)&&(!f.group||effectiveGroup(w)===f.group)&&(!f.status||(states[w.id]?.status||'pendiente')===f.status)&&(!bibChoice||bibliographies(w).some(b=>b.key===bibChoice))&&(!wordChoice||String(w.title||'').split(/[^\p{L}]+/u).some(x=>wordCanonical(x)===wordChoice))&&norm([w.student,w.title,w.commission,w.cases.map(c=>c.name).join(' ')].join(' ')).includes(q)).sort((a,b)=>f.sort==='date'?b.modified-a.modified:f.sort==='title'?a.title.localeCompare(b.title,'es'):f.sort==='grade_desc'||f.sort==='grade_asc'?compareGrades(a,b,f.sort==='grade_desc') : a.student.localeCompare(b.student,'es'))}
 function render(){const ws=visible();openedOrder=ws.map(w=>w.id);persist();$('totalWorks').textContent=ws.length;$('average').textContent=ws.length?Math.round(ws.reduce((s,w)=>s+w.word_count,0)/ws.length):0;
  const cs=ws.flatMap(w=>w.cases.map(c=>({...c,workId:w.id,student:w.student,title:w.title})));$('totalCases').textContent=cs.filter(c=>c.type!=='Reflexión').length;$('geocases').textContent=cs.filter(c=>c.lat!==null&&c.lon!==null).length;
  const ended=ws.filter(w=>states[w.id]?.status==='terminado').length;$('progressLabel').textContent=`${ended} terminados de ${ws.length} · ${ws.length?Math.round(100*ended/ws.length):0}%`; $('progressBar').style.width=(ws.length?100*ended/ws.length:0)+'%';
@@ -130,18 +130,28 @@ function render(){const ws=visible();openedOrder=ws.map(w=>w.id);persist();$('to
 // Agrupación igual al Python: hasta siete tokens de autor, año y nueve de título.
 // En cada entrega una referencia suma como máximo una vez.
 function bibliographyIdentity(citation){
- const entry=String(citation||'').replace(/https?:\/\/\S+/gi,'').replace(/\s+/g,' ').trim().replace(/^[\s:;,.-]+|[\s:;,.-]+$/g,'');
+ const original=String(citation||'').trim();
+ // Una entrada formada solo por URL no tiene autor: mostrar Link sin perder su identidad.
+ // La URL entera identifica la entrada para evitar agrupar enlaces distintos.
+ const compact=original.replace(/\s+/g,' ').trim();
+ const linkOnly=/^(?:https?:\/\/|www\.)\S+$/i.test(compact);
+ if(linkOnly){
+  const normalized=compact.replace(/^https?:\/\//i,'').replace(/^www\./i,'').replace(/\/$/,'').toLocaleLowerCase('es');
+  return {key:'url|'+normalized,label:'Link',citation:original};
+ }
+ // Igual al corrector Python: eliminar URLs auxiliares antes de extraer autor/año/título.
+ const entry=compact.replace(/https?:\/\/\S+/gi,'').replace(/\s+/g,' ').trim().replace(/^[\s:;,.-]+|[\s:;,.-]+$/g,'');
  const match=entry.match(/\(?((?:19|20)\d{2})[a-z]?\)?/i);
  const pre=match?entry.slice(0,match.index):entry;
  const post=match?entry.slice(match.index+match[0].length):'';
  const tokens=v=>(norm(v).match(/[a-z0-9]+/g)||[]);
  const author=tokens(pre).slice(0,7).join(' '),year=match?match[1]:'',title=tokens(post).slice(0,9).join(' ');
  const key=author||year||title?[author,year,title].join('|'):[tokens(entry).slice(0,18).join(' '),'',''].join('|');
- const label=(pre.replace(/[\s.,:;]+$/,'').trim().slice(0,60)||entry.slice(0,60))+(year?' ('+year+')':'');
- return {key,label,citation:String(citation||'')};
+ const label=(pre.replace(/[\s.,:;]+$/,'').trim().slice(0,60)||entry.slice(0,60)||'Link')+(year?' ('+year+')':'');
+ return {key:key==='||'?'url|'+compact.toLocaleLowerCase('es'):key,label,citation:original};
 }
 function bibliographies(w){return (w.bibliography||[]).map(b=>typeof b==='string'?bibliographyIdentity(b):b&&typeof b==='object'&&b.citation?bibliographyIdentity(b.citation):null).filter(Boolean)}
-function showBibTip(text,e){const tip=$('bibTooltip');tip.textContent=text;tip.hidden=false;moveBibTip(e)}
+function showBibTip(text,e){const tip=$('bibTooltip');tip.textContent=String(text||'').trim();tip.hidden=false;moveBibTip(e)}
 function moveBibTip(e){const tip=$('bibTooltip');if(tip.hidden)return;tip.style.left=Math.min(e.clientX+16,innerWidth-tip.offsetWidth-12)+'px';tip.style.top=Math.max(8,Math.min(e.clientY+14,innerHeight-tip.offsetHeight-12))+'px'}
 function hideBibTip(){$('bibTooltip').hidden=true}
 function updateBibliography(ws){
