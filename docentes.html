@@ -6,7 +6,8 @@
 </style></head><body>
 <header><div><h1>Seminarios IU · Panel docente</h1><span class="muted">Entregas 2026 · corrección y atlas de casos</span></div><div class="right"><span id="userLabel" class="muted"></span><a href="index.html">Editor de estudiantes</a><button id="logout" class="secondary hidden">Cerrar sesión</button></div></header>
 <div id="login" class="login-card"><h2>Acceso docente</h2><p class="muted">Ingresá tus credenciales asignadas. Las entregas y correcciones no son públicas.</p><form id="loginForm"><label for="username">Usuario</label><input id="username" required autocomplete="username"><label for="password">Contraseña</label><input id="password" type="password" required autocomplete="current-password"><div class="actions"><button type="submit">Ingresar</button></div></form><p class="error" id="loginError" aria-live="polite"></p></div>
-<div id="loading" class="hidden" role="status" aria-live="polite">Consultando las entregas de 2026 en Google Drive…</div>
+<div id="loading" class="hidden" role="status" aria-live="polite">Leyendo índice de entregas 2026…</div>
+<div id="buildBox" class="login-card hidden"><h2>Índice de entregas</h2><p id="buildInfo">Todavía no existe el índice general en Google Drive.</p><button id="buildButton" class="hidden">Crear índice de entregas 2026</button><p id="buildError" class="error"></p></div>
 <div id="layout" class="hidden">
 <section class="pane"><div class="pane-head"><h2>Bibliografía citada</h2><p class="muted">Seleccioná una referencia para filtrar las entregas.</p><button id="clearBib" class="secondary">Quitar selección</button></div><div id="bib" class="pane-body"></div></section>
 <section class="pane"><div class="pane-head"><h2>Filtros y estadísticas</h2></div><div class="pane-body"><div class="field"><label for="teacher">Docente</label><select id="teacher"></select></div><div class="filter-grid"><div class="field"><label for="year">Año</label><select id="year"><option value="2026">2026</option></select></div><div class="field"><label for="group">Grupo</label><select id="group"></select></div></div><div class="field"><label for="search">Buscar por estudiante, título o caso</label><input id="search" placeholder="Buscar…"></div><div class="filter-grid"><div class="field"><label for="sort">Ordenar</label><select id="sort"><option value="student">Estudiante</option><option value="title">Título</option><option value="date">Fecha reciente</option></select></div><div class="field"><label for="status">Estado</label><select id="status"><option value="">Todos</option><option value="pendiente">Por corregir</option><option value="en_proceso">En proceso</option><option value="terminado">Terminado</option></select></div></div><div class="counters"><div class="counter"><strong id="totalWorks">0</strong>Entregas</div><div class="counter"><strong id="average">0</strong>Palabras promedio</div><div class="counter"><strong id="totalCases">0</strong>Casos</div><div class="counter"><strong id="geocases">0</strong>Geolocalizados</div></div><h2>Nube de títulos</h2><div id="cloud"></div></div></section>
@@ -46,18 +47,18 @@ $('logout').addEventListener('click',async()=>{try{await api('logout')}catch(e){
 async function loadIndex(){
  $('loading').classList.remove('hidden');$('login').classList.add('hidden');
  try{
-  const collected=[],changes={};let cursor=null,batches=0,scannedTotal=0;
-  do{
-    const d=await api('list',cursor?{cursor}:{});
-    profile=d.profile;
-    collected.push(...(d.works||[]));Object.assign(changes,d.corrections||{});
-    cursor=d.cursor||null;batches++;scannedTotal+=Number(d.scanned||0);
-    $('loading').textContent='Consultando Google Drive… '+scannedTotal+' archivos examinados, '+collected.length+' entregas 2026 encontradas.';
-    if(batches>800)throw Error('La carpeta contiene demasiados archivos para esta consulta.');
-  }while(cursor);
-  // Un único trabajo (la entrega más reciente) por estudiante y docente.
-  const latest=new Map();for(const w of collected){const key=norm(w.student)+'|'+norm(w.commission)+'|2026';if(!latest.has(key)||w.modified>latest.get(key).modified)latest.set(key,w)}
-  allWorks=[...latest.values()];states={};for(const w of allWorks)if(changes[w.id])states[w.id]=changes[w.id];
+  const d=await api('list');profile=d.profile;
+  if(d.needsBuild){
+   $('loading').classList.add('hidden');
+   $('buildBox').classList.remove('hidden');
+   $('userLabel').textContent=profile.display;$('logout').classList.remove('hidden');
+   const admin=profile.role==='admin';
+   $('buildButton').classList.toggle('hidden',!admin);
+   $('buildInfo').textContent=admin?'No existe todavía el índice de Drive. Crealo una sola vez; después el panel abrirá directamente.':'El administrador debe crear el índice inicial de entregas. No es necesario recorrer todos los archivos en cada ingreso.';
+   return;
+  }
+  $('buildBox').classList.add('hidden');
+  allWorks=d.works||[];states=d.corrections||{};
   $('loading').textContent='Entregas cargadas.';
  $('userLabel').textContent=profile.display;$('logout').classList.remove('hidden');
  const ts=[...new Set(allWorks.map(w=>w.commission))].sort((a,b)=>a.localeCompare(b,'es'));
@@ -68,7 +69,7 @@ async function loadIndex(){
  bibChoice=s.bibChoice||'';wordChoice=s.wordChoice||'';
  updateGroups();if([...$('group').options].some(o=>o.value===s.group))$('group').value=s.group;
  $('layout').classList.remove('hidden');initMap();render();
- }catch(e){if(/sesión|iniciá sesión|vencida/i.test(e.message)){session='';sessionStorage.removeItem('iu_session')}$('login').classList.remove('hidden');$('loginError').textContent='No se pudo cargar el listado: '+e.message+' Podés volver a ingresar para reintentar.';console.error('Carga de entregas:',e);throw e}finally{$('loading').classList.add('hidden');$('loading').textContent='Consultando las entregas de 2026 en Google Drive…'}
+ }catch(e){if(/sesión|iniciá sesión|vencida/i.test(e.message)){session='';sessionStorage.removeItem('iu_session')}$('login').classList.remove('hidden');$('loginError').textContent='No se pudo cargar el listado: '+e.message+' Podés volver a ingresar para reintentar.';console.error('Carga de entregas:',e);throw e}finally{$('loading').classList.add('hidden');$('loading').textContent='Leyendo índice de entregas 2026…'}
 }
 function updateGroups(){const t=$('teacher').value,old=$('group').value;const groups=[...new Set(allWorks.filter(w=>!t||w.commission===t).map(w=>w.group).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));$('group').innerHTML='<option value="">Todos los grupos</option>'+groups.map(g=>`<option value="${esc(g)}">${esc(g)}</option>`).join('');if(groups.includes(old))$('group').value=old;}
 function visible(){const f=filters(),q=norm(f.search);return allWorks.filter(w=>(!f.teacher||w.commission===f.teacher)&&(!f.group||w.group===f.group)&&(!f.status||(states[w.id]?.status||'pendiente')===f.status)&&(!bibChoice||w.bibliography.some(b=>norm(b)===bibChoice))&&(!wordChoice||norm(w.title).split(/[^\p{L}]+/u).includes(wordChoice))&&norm([w.student,w.title,w.commission,w.cases.map(c=>c.name).join(' ')].join(' ')).includes(q)).sort((a,b)=>f.sort==='date'?b.modified-a.modified:f.sort==='title'?a.title.localeCompare(b.title,'es'):a.student.localeCompare(b.student,'es'))}
@@ -127,5 +128,19 @@ $('exportCSV').onclick=()=>{const lines=[headers,...exportRows()].map(row=>row.m
 function colName(i){let s='';for(i++;i;i=Math.floor((i-1)/26))s=String.fromCharCode(65+(i-1)%26)+s;return s}
 function xmlEscape(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c])).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g,'')}
 $('exportExcel').onclick=async()=>{try{if(!window.JSZip)throw Error('No se cargó JSZip');const rows=[headers,...exportRows()];const body=rows.map((row,j)=>`<row r="${j+1}">${row.map((v,i)=>`<c r="${colName(i)}${j+1}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(v)}</t></is></c>`).join('')}</row>`).join('');const zip=new JSZip();zip.file('[Content_Types].xml','<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>');zip.file('_rels/.rels','<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');zip.file('xl/workbook.xml','<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Correcciones 2026" sheetId="1" r:id="rId1"/></sheets></workbook>');zip.file('xl/_rels/workbook.xml.rels','<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>');zip.file('xl/worksheets/sheet1.xml',`<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData><autoFilter ref="A1:F${rows.length}"/></worksheet>`);const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE'});download(blob,'correcciones_2026.xlsx');$('exportMsg').textContent='Excel generado.'}catch(e){$('exportMsg').textContent=e.message}};
+$('buildButton').onclick=async()=>{
+ const btn=$('buildButton');btn.disabled=true;$('buildError').textContent='';
+ let cursor=null;
+ try{
+  do{
+   const d=await api('rebuildIndex',cursor?{cursor}:{});
+   cursor=d.cursor||null;
+   $('buildInfo').textContent=`Preparando índice en Drive… ${d.scanned||0} archivos examinados; ${d.found||0} entregas 2026 registradas.`;
+  }while(cursor);
+  $('buildInfo').textContent='Índice creado. Cargando panel…';
+  await loadIndex();
+ }catch(e){$('buildError').textContent='No se pudo completar la indexación: '+e.message+' Podés reintentar.';console.error(e)}
+ finally{btn.disabled=false}
+};
 if(session)loadIndex().catch(e=>console.warn('Sesión',e));
 </script></body></html>

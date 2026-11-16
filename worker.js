@@ -77,7 +77,7 @@ export default {
         const raw=await request.text();
         if(new TextEncoder().encode(raw).byteLength>150000)return reply({ok:false,error:"Solicitud demasiado grande"},413);
         const body=JSON.parse(raw);
-        const actions=["login","logout","list","get","saveCorrection"];
+        const actions=["login","logout","list","get","saveCorrection","rebuildIndex"];
         if(!body||!actions.includes(body.action))return reply({ok:false,error:"Acción inválida"},400);
         const controller=new AbortController();
         const timer=setTimeout(()=>controller.abort(),55000);
