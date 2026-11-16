@@ -35,6 +35,9 @@
 .toc a.section-parent{font-weight:800;background:#e9f3f5;color:#174d60}
 .toc a.section-sub{padding-left:17px;font-size:10.5px}
 .toc a.active{background:#eaf3f5;color:#174d60;font-weight:700}
+/* Apartado en lectura: negrita y contraste sin alterar los tildes de corrección */
+.toc a.reading-active{font-weight:800;color:#123f52;background:#dfeef3;border-left:3px solid #26627a;padding-left:5px}
+.toc a.reading-active.section-sub{padding-left:14px}
 .toc-tick{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:14px;height:14px;border:1px solid #cbdce3;border-radius:4px;margin-top:1px;color:transparent;font-size:11px;font-weight:800}
 .toc a.checked .toc-tick{color:#1d7755;background:#d9eee4;border-color:#9bcab4}.toc a.checked .toc-tick:after{content:'✓'}
 .toc .toc-divider{height:1px;background:#e5edf0;margin:11px 0}
@@ -271,9 +274,47 @@ function paintReader(){
  `<section id="general"><h2>Observaciones y calificación</h2><div class="read-general ${editing?'hidden':''}"><h3>Observaciones generales</h3><p>${esc(correction.general||'Sin observaciones generales registradas')}</p><h3>Observaciones parciales compiladas</h3><p>${esc(compiled(correction)||'Sin observaciones parciales registradas')}</p><p class="meta">Estado: ${correctionStatus(correction)==='terminado'?'Terminado de corregir':correctionStatus(correction)==='en_proceso'?'En proceso':'Por corregir'} · Nota: ${correction.grade?esc(correction.grade)+'/10':'Sin nota'}</p></div><div id="generalEditor" class="${editing?'':'hidden'}"><div class="general-cols"><div><label>Observaciones generales</label><textarea id="generalText">${esc(correction.general||'')}</textarea></div><div><label>Observaciones parciales compiladas</label><textarea id="compiled" readonly></textarea></div></div><div class="review-controls"><label>Nota (1 a 10)<select id="grade"><option value="">Sin nota</option>${Array.from({length:10},(_,i)=>`<option value="${i+1}" ${Number(correction.grade)===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label><label>Estado<select id="correctionStatus"><option value="en_proceso" ${correction.status==='terminado'?'':'selected'}>En proceso</option><option value="terminado" ${correction.status==='terminado'?'selected':''}>Terminado de corregir</option></select></label><button id="saveCorrection">Guardar corrección</button><span id="saveMessage" role="status"></span></div></div></section>`;
  $('tocLinks').innerHTML='<a href="#readerTop" id="tocTop">Inicio</a>'+sections.map((s,i)=>`<a href="#part-${i}" data-check="${esc(s.key)}" class="${s.key==='intro'?'section-parent':s.key.startsWith('subsection_')?'section-sub':''}"><span class="toc-tick" aria-hidden="true"></span><span>${esc(s.title)}</span></a>`).join('')+'<div class="toc-divider"></div><a href="#general" id="tocGeneral">Observaciones generales</a>';
  $('tocTop').onclick=e=>{e.preventDefault();$('readerScroll').scrollTop=0};$('tocLinks').querySelectorAll('a[href^="#part"]').forEach(a=>a.onclick=e=>{e.preventDefault();$(a.hash.slice(1)).scrollIntoView({behavior:'smooth'})});$('tocGeneral').onclick=e=>{e.preventDefault();$('general').scrollIntoView({behavior:'smooth'})};
+ setupReadingSectionTracker();
  $('reviewState').textContent=correctionStatus(correction)==='terminado'?`Terminado · Nota ${correction.grade}/10`:correctionStatus(correction)==='en_proceso'?'En proceso':'Por corregir';
  $('editMode').classList.toggle('hidden',!currentCanEdit);$('editMode').textContent=editing?'✎ Editando':'✎ Editar';$('saveCorrection').onclick=saveReview;
  $('readerPaper').querySelectorAll('[data-note], [data-done], #generalText, #grade, #correctionStatus, #editGroup').forEach(el=>el.addEventListener(el.matches('[data-note],#generalText,#editGroup')?'input':'change',()=>{dirty=true;updateCompiled();updateChecks()}));updateCompiled();updateChecks();if(!editing)$('readerScroll').scrollTop=0;
+}
+// Resalta automáticamente el apartado que ocupa la zona superior de lectura.
+// El desplazamiento ocurre dentro de #readerScroll (no en window).
+let readingScrollFrame=0;
+function updateReadingSection(){
+ const scroll=$('readerScroll');
+ if($('review').classList.contains('hidden'))return;
+ const links=[...$('tocLinks').querySelectorAll('a[href^="#"]')];
+ const sections=[...$('readerPaper').querySelectorAll('section.section')];
+ const general=$('general');
+ const edge=scroll.getBoundingClientRect().top+Math.min(145,Math.max(65,scroll.clientHeight*.22));
+ let selected='tocTop';
+ for(const section of sections){
+  if(section.getBoundingClientRect().top<=edge)selected='part-'+section.id.slice(5);
+  else break;
+ }
+ if(general&&general.getBoundingClientRect().top<=edge)selected='tocGeneral';
+ const nearEnd=scroll.scrollHeight-scroll.scrollTop-scroll.clientHeight<18;
+ if(nearEnd&&general)selected='tocGeneral';
+ links.forEach(a=>{
+  const active=a.id===selected||(a.getAttribute('href')==='#'+selected);
+  a.classList.toggle('reading-active',active);
+  if(active)a.setAttribute('aria-current','location');else a.removeAttribute('aria-current');
+ });
+}
+function setupReadingSectionTracker(){
+ // Un solo controlador, también tras redibujar el lector al editar o guardar.
+ const scroll=$('readerScroll');
+ if(!scroll.dataset.tocTracker){
+  scroll.dataset.tocTracker='1';
+  scroll.addEventListener('scroll',()=>{
+   if(readingScrollFrame)cancelAnimationFrame(readingScrollFrame);
+   readingScrollFrame=requestAnimationFrame(()=>{readingScrollFrame=0;updateReadingSection()});
+  },{passive:true});
+  window.addEventListener('resize',updateReadingSection);
+ }
+ requestAnimationFrame(updateReadingSection);
 }
 function updateCompiled(){const target=$('compiled');if(!target)return;target.value=[...document.querySelectorAll('[data-note]')].filter(x=>x.value.trim()).map(x=>{const s=x.closest('.section');return s.querySelector('h2').textContent+'\n'+x.value.trim()}).join('\n\n────────────\n\n');}
 function updateChecks(){document.querySelectorAll('[data-check]').forEach(a=>{const box=[...document.querySelectorAll('[data-done]')].find(x=>x.dataset.done===a.dataset.check);a.classList.toggle('checked',box?!!box.checked:!!correction.completed?.[a.dataset.check])})}
