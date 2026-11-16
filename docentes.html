@@ -14,7 +14,18 @@
 .bib-row .bib-count{font-size:12px;font-weight:800;color:#23556c;flex-shrink:0}
 .bib-row .bib-track{width:100%;height:17px;background:#e8eff2;border-radius:4px;overflow:hidden}
 .bib-row .bib-fill{display:block;height:100%;background:#5b91a2;border-radius:4px;transition:width .2s ease}
-.bib-row:hover .bib-fill{background:#287489}.bib-row.selected .bib-fill{background:#1b516a}
+.bib-row:hover .bib-fill{background:#287489}.bib-row.selected .bib-fill{background:#226f7d}
+/* Gráfico de frecuencia bibliográfica: escala, color y popup del corrector Python */
+#bib .bib-row{padding:8px 1px 9px;border-bottom:0}
+#bib .bib-row .bib-head{margin-bottom:5px}
+#bib .bib-row .bib-title{color:#344652;font-size:11px;font-weight:700}
+#bib .bib-row .bib-count{color:#244b59;font-size:12px}
+#bib .bib-row .bib-track{height:18px;background:#f4eae4}
+#bib .bib-row .bib-fill{background:#b1542a;height:100%}
+#bib .bib-row:hover .bib-fill{background:#8b3619}
+#bib .bib-row.selected .bib-fill{background:#226f7d}
+.bib-tooltip{position:fixed;z-index:7000;pointer-events:none;background:#183540;color:white;padding:10px 12px;border-radius:8px;max-width:min(400px,85vw);font-size:11px;line-height:1.5;box-shadow:0 4px 20px #0003;white-space:normal;overflow-wrap:anywhere}
+.bib-tooltip[hidden]{display:none}
 #cloud{position:relative;height:315px;background:white;overflow:hidden;border-radius:8px}
 .cloud-packed{position:relative;width:100%;height:100%}
 .cloud-word{position:absolute;display:block;white-space:nowrap;margin:0;border:0;padding:0;background:none;color:var(--accent);line-height:1.1;letter-spacing:-.035em;font:800 15px Montserrat,Arial,sans-serif;transform-origin:center;cursor:pointer}
@@ -42,7 +53,7 @@ button.is-busy:before{content:'◌';display:inline-block;margin-right:6px;animat
 <div id="loading" class="hidden" role="status" aria-live="polite">Leyendo índice de entregas 2026…</div>
 <div id="buildBox" class="login-card hidden"><h2>Índice de entregas</h2><p id="buildInfo">Todavía no existe el índice general en Google Drive.</p><button id="buildButton" class="hidden">Crear índice de entregas 2026</button><p id="buildError" class="error"></p></div>
 <div id="layout" class="hidden">
-<section class="pane"><div class="pane-head"><h2>Bibliografía más utilizada</h2><p class="muted">Cantidad de entregas que citan cada referencia. Pasá el mouse para ver la cita completa y tocá una barra para filtrar.</p><button id="clearBib" class="secondary">Quitar selección</button></div><div id="bib" class="pane-body"></div></section>
+<section class="pane"><div class="pane-head"><h2>Bibliografía más utilizada</h2><p class="muted">Cantidad de entregas que citan cada referencia. Pasá el mouse para ver la cita completa y tocá una barra para filtrar.</p><button id="clearBib" class="secondary">Quitar selección</button><button id="refreshBib" class="secondary hidden" type="button" style="margin-left:6px" title="Reconstruye el índice bibliográfico desde las entregas originales (solo administradores)">Recalcular bibliografía</button><p id="bibRefreshState" class="muted" role="status"></p></div><div id="bib" class="pane-body"></div><div id="bibTooltip" class="bib-tooltip" role="tooltip" hidden></div></section>
 <section class="pane"><div class="pane-head"><h2>Filtros y estadísticas</h2></div><div class="pane-body"><div class="field teacher-field"><label for="teacher">Docente a cargo</label><select id="teacher"></select></div><div class="filter-grid"><div class="field"><label for="year">Año</label><select id="year"><option value="2026">2026</option></select></div><div class="field"><label for="group">Grupo</label><select id="group"></select></div></div><div class="field"><label for="search">Buscar por estudiante, título o caso</label><input id="search" placeholder="Buscar…"></div><div class="filter-grid"><div class="field"><label for="sort">Ordenar</label><select id="sort"><option value="student">Estudiante</option><option value="title">Título</option><option value="date">Fecha reciente</option><option value="grade_desc">Nota: mayor a menor</option><option value="grade_asc">Nota: menor a mayor</option></select></div><div class="field"><label for="status">Estado</label><select id="status"><option value="">Todos</option><option value="pendiente">Por corregir</option><option value="en_proceso">En proceso</option><option value="terminado">Terminado</option></select></div></div><div class="counters"><div class="counter"><strong id="totalWorks">0</strong>Entregas</div><div class="counter"><strong id="average">0</strong>Palabras promedio</div><div class="counter"><strong id="totalCases">0</strong>Casos</div><div class="counter"><strong id="geocases">0</strong>Geolocalizados</div></div><h2>Palabras más frecuentes en los títulos</h2><p class="muted">Se agrupan variantes de género y número. Tocá una palabra para filtrar.</p><div id="cloud"></div></div></section>
 <section class="pane"><div class="pane-head"><h2>Atlas de casos de estudio</h2><p class="muted">Hover para ver el nombre; clic para abrir el detalle.</p></div><div class="map-holder"><div id="map"></div><div id="casePanel" class="case-panel hidden"></div></div><div class="cases" id="cases"></div></section>
 <section class="pane"><div class="pane-head"><h2>Entregas y correcciones</h2><p class="muted" id="progressLabel">Sin datos</p><div class="progress"><b id="progressBar"></b></div><div class="actions"><button id="exportCSV" class="secondary">Exportar CSV</button><button id="exportExcel" class="secondary">Exportar Excel</button></div><p class="muted" id="exportMsg"></p></div><div class="pane-body" id="works"></div></section>
@@ -100,7 +111,7 @@ async function loadIndex(){
  $('teacher').disabled=false;
  const s=saved();if(ts.includes(s.teacher))$('teacher').value=s.teacher;
  for(const k of ['sort','status','search'])if(typeof s[k]==='string'){$(k).value=s[k]}
- bibChoice=s.bibChoice||'';wordChoice=s.wordChoice||'';
+ bibChoice=s.bibChoice||'';wordChoice=s.wordChoice||'';if(bibChoice&&!allWorks.some(w=>bibliographies(w).some(b=>b.key===bibChoice)))bibChoice='';$('refreshBib').classList.toggle('hidden',profile.role!=='admin');
  updateGroups();if([...$('group').options].some(o=>o.value===s.group))$('group').value=s.group;
  $('layout').classList.remove('hidden');initMap();render();
  }catch(e){if(/sesión|iniciá sesión|vencida/i.test(e.message)){session='';sessionStorage.removeItem('iu_session')}$('login').classList.remove('hidden');$('loginError').textContent='No se pudo cargar el listado: '+e.message+' Podés volver a ingresar para reintentar.';console.error('Carga de entregas:',e);throw e}finally{$('loading').classList.add('hidden');$('loading').textContent='Leyendo índice de entregas 2026…'}
@@ -116,12 +127,30 @@ function render(){const ws=visible();openedOrder=ws.map(w=>w.id);persist();$('to
  $('works').querySelectorAll('button[data-open]').forEach(b=>b.addEventListener('click',()=>openWork(b.dataset.open,b)));
  updateBibliography(ws);updateCloud(ws);updateMap(cs);
 }
-function updateBibliography(ws){
- const counts=new Map();ws.forEach(w=>{const seen=new Set();(w.bibliography||[]).forEach(b=>{const text=String(b||'').trim(),k=norm(text);if(!k||seen.has(k))return;seen.add(k);if(!counts.has(k))counts.set(k,{text,count:0});counts.get(k).count++})});
- const ranked=[...counts.values()].sort((a,b)=>b.count-a.count||a.text.localeCompare(b.text,'es')).slice(0,50),maximum=ranked[0]?.count||1;
- $('bib').innerHTML=ranked.map(b=>`<button type="button" class="bib-row ${norm(b.text)===bibChoice?'selected':''}" title="${esc(b.text)}" data-key="${esc(norm(b.text))}"><span class="bib-head"><span class="bib-title">${esc(b.text)}</span><strong class="bib-count">${b.count}</strong></span><span class="bib-track"><span class="bib-fill" style="width:${Math.max(3,Math.round(100*b.count/maximum))}%"></span></span></button>`).join('')||'<span class="muted">Sin bibliografía registrada.</span>';
- $('bib').querySelectorAll('[data-key]').forEach(b=>b.addEventListener('click',()=>{bibChoice=bibChoice===b.dataset.key?'':b.dataset.key;render()}));
+// Agrupación igual al Python: hasta siete tokens de autor, año y nueve de título.
+// En cada entrega una referencia suma como máximo una vez.
+function bibliographyIdentity(citation){
+ const entry=String(citation||'').replace(/https?:\/\/\S+/gi,'').replace(/\s+/g,' ').trim().replace(/^[\s:;,.-]+|[\s:;,.-]+$/g,'');
+ const match=entry.match(/\(?((?:19|20)\d{2})[a-z]?\)?/i);
+ const pre=match?entry.slice(0,match.index):entry;
+ const post=match?entry.slice(match.index+match[0].length):'';
+ const tokens=v=>(norm(v).match(/[a-z0-9]+/g)||[]);
+ const author=tokens(pre).slice(0,7).join(' '),year=match?match[1]:'',title=tokens(post).slice(0,9).join(' ');
+ const key=author||year||title?[author,year,title].join('|'):[tokens(entry).slice(0,18).join(' '),'',''].join('|');
+ const label=(pre.replace(/[\s.,:;]+$/,'').trim().slice(0,60)||entry.slice(0,60))+(year?' ('+year+')':'');
+ return {key,label,citation:String(citation||'')};
 }
+function bibliographies(w){return (w.bibliography||[]).map(b=>typeof b==='string'?bibliographyIdentity(b):b&&typeof b==='object'&&b.citation?bibliographyIdentity(b.citation):null).filter(Boolean)}
+function showBibTip(text,e){const tip=$('bibTooltip');tip.textContent=text;tip.hidden=false;moveBibTip(e)}
+function moveBibTip(e){const tip=$('bibTooltip');if(tip.hidden)return;tip.style.left=Math.min(e.clientX+16,innerWidth-tip.offsetWidth-12)+'px';tip.style.top=Math.max(8,Math.min(e.clientY+14,innerHeight-tip.offsetHeight-12))+'px'}
+function hideBibTip(){$('bibTooltip').hidden=true}
+function updateBibliography(ws){
+ const counts=new Map();ws.forEach(w=>{const seen=new Set();bibliographies(w).forEach(b=>{if(!b.key||seen.has(b.key))return;seen.add(b.key);if(!counts.has(b.key))counts.set(b.key,{...b,count:0});counts.get(b.key).count++})});
+ const ranked=[...counts.values()].sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label,'es')).slice(0,15),maximum=ranked[0]?.count||1;
+ $('bib').innerHTML=ranked.map(b=>`<button type="button" class="bib-row ${b.key===bibChoice?'selected':''}" data-key="${esc(b.key)}" aria-label="${esc(b.citation)}: ${b.count} entregas" title=""><span class="bib-head"><span class="bib-title">${esc(b.label)}</span><strong class="bib-count">${b.count}</strong></span><span class="bib-track"><span class="bib-fill" style="width:${Math.max(3,Math.round(100*b.count/maximum))}%"></span></span></button>`).join('')||'<span class="muted">Sin bibliografía registrada.</span>';
+ $('bib').querySelectorAll('[data-key]').forEach(b=>{const item=ranked.find(v=>v.key===b.dataset.key);b.addEventListener('click',()=>{bibChoice=bibChoice===b.dataset.key?'':b.dataset.key;hideBibTip();render()});if(item){b.addEventListener('mouseenter',e=>showBibTip(item.citation,e));b.addEventListener('mousemove',moveBibTip);b.addEventListener('mouseleave',hideBibTip);b.addEventListener('focus',()=>{b.setAttribute('title',item.citation)});b.addEventListener('blur',()=>b.removeAttribute('title'))}});
+}
+
 const stop=new Set('a al ante bajo cabe con contra de del desde durante en entre hacia hasta mediante para por segun sin so sobre tras versus via el la los las lo un una unos unas y e o u ni que cual cuales se su sus este esta estos estas ese esa esos esas aquel aquella aquellos aquellas es son ser como mas menos muy ya no'.split(' '));
 const wordPairs={urbana:'urbano',urbanas:'urbano',urbanos:'urbano',publica:'publico',publicas:'publico',publicos:'publico',privada:'privado',privadas:'privado',privados:'privado',rurales:'rural',ciudades:'ciudad',espacios:'espacio',territorios:'territorio',ambientales:'ambiental',sociales:'social',naturales:'natural',centrales:'central',locales:'local',regionales:'regional',metropolitanas:'metropolitano',metropolitanos:'metropolitano',metropolitana:'metropolitano',urbanisticas:'urbanistico',urbanisticos:'urbanistico',urbanistica:'urbanistico'};
 function wordCanonical(token){token=norm(token);if(wordPairs[token])return wordPairs[token];if(token.endsWith('s')&&token.length>5){const single=token.slice(0,-1);if(wordPairs[single])return wordPairs[single];if(single.endsWith('o')||single.endsWith('a'))return single}return token}
@@ -154,8 +183,40 @@ function drawCloud(){
 window.addEventListener('resize',()=>{clearTimeout(cloudTimer);cloudTimer=setTimeout(drawCloud,120)});if(document.fonts?.ready)document.fonts.ready.then(()=>drawCloud());
 function initMap(){if(map||!window.L)return;map=L.map('map').setView([-32.95,-60.67],9);const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{attribution:'Tiles © Esri'});const streets=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{attribution:'© Esri'});streets.addTo(map);L.control.layers({'Esri Callejero':streets,'Esri Satelital':sat}).addTo(map);markers=L.featureGroup().addTo(map);setTimeout(()=>map.invalidateSize(),100)}
 function updateMap(cs){if(!map)return;markers.clearLayers();const geo=cs.filter(c=>c.lat!==null&&c.lon!==null);for(const c of geo){const marker=L.marker([c.lat,c.lon]).addTo(markers);marker.bindTooltip(c.name,{sticky:true});marker.on('click',()=>showCase(c))}if(geo.length)map.fitBounds(markers.getBounds().pad(.14),{maxZoom:12});$('cases').innerHTML=cs.map(c=>`<div class="case-item"><b>${esc(c.name)}</b><p class="muted">${esc(c.student)} · ${esc(c.location)}</p><button class="secondary" data-case="${esc(c.workId)}" data-key="${esc(c.key)}">Ver caso</button></div>`).join('');$('cases').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{const c=cs.find(x=>x.workId===b.dataset.case&&x.key===b.dataset.key);if(c)showCase(c)}));}
-function firstImage(d){const f=d.fields||{};for(const key of ['abstract','intro','case1','case2','rosario','conclusion']){const m=String(f[key]||'').match(/<img[^>]+src=["'](data:image\/(?:png|jpeg|webp);base64,[^"']+)["']/i);if(m)return m[1]};return ''}
-async function showCase(c){const panel=$('casePanel');panel.classList.remove('hidden');panel.innerHTML='<button class="close secondary" id="closeCase">Cerrar ✕</button><p>Cargando caso…</p>';$('closeCase').onclick=()=>panel.classList.add('hidden');try{const r=await api('get',{id:c.workId}),d=r.submission;const image=firstImage(d);panel.innerHTML=`<button class="close secondary" id="closeCase">Cerrar ✕</button><h3>${esc(c.name)}</h3><p>${esc(c.location)}</p>${image?`<img src="${esc(image)}" alt="Primera imagen del trabajo">`:''}<h4>${esc(c.title)}</h4><p>${esc(c.student)}</p><p>${esc(String(d.fields?.abstract||'').replace(/<[^>]+>/g,' '))}</p><button id="openFromCase">Abrir entrega</button>`;$('closeCase').onclick=()=>panel.classList.add('hidden');$('openFromCase').onclick=()=>{panel.classList.add('hidden');openWork(c.workId)}}catch(e){panel.innerHTML=`<button id="closeCase">Cerrar</button><p class="error">${esc(e.message)}</p>`;$('closeCase').onclick=()=>panel.classList.add('hidden')}}
+// La primera imagen debe pertenecer al apartado del caso marcado, jamás a otro apartado.
+function firstCaseImage(d,key){
+ if(!['case1','case2','rosario'].includes(key))return null;
+ const html=String(d.fields?.[key]||'');
+ // Primero, la figura insertada realmente en el texto del caso.
+ const imageRe=/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
+ let found;
+ while((found=imageRe.exec(html))!==null){
+  const raw=found[1].replace(/&amp;/g,'&');
+  if(!/^data:image\/(?:png|jpeg|jpg|webp|gif);base64,/i.test(raw)&&!/^https:\/\//i.test(raw))continue;
+  const rest=html.slice(found.index),captionMatch=rest.match(/<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>/i);
+  return {src:raw,caption:captionMatch?captionMatch[1].replace(/<[^>]+>/g,' ').trim():''};
+ }
+ // Compatibilidad con archivos originales que guardan las figuras en colecciones.
+ const groups=[];
+ if(d.caseImages&&typeof d.caseImages==='object')groups.push(d.caseImages[key]);
+ if(d.images&&Array.isArray(d.images))groups.push(d.images[{case1:1,case2:2,rosario:3}[key]]);
+ else if(d.images&&typeof d.images==='object')groups.push(d.images[key]);
+ function search(value){
+  if(Array.isArray(value)){for(const v of value){const found=search(v);if(found)return found}return null}
+  if(typeof value==='string')return /^(data:image\/|https:\/\/)/i.test(value)?{src:value,caption:''}:null;
+  if(value&&typeof value==='object'){
+   const src=['src','data','dataUrl','dataURL','base64','url','image','imageData','imageUrl','imageDataUrl'].map(k=>value[k]).find(v=>typeof v==='string'&&v);
+   if(src){const full=/^[a-z0-9+/=\s]{200,}$/i.test(src)?'data:image/jpeg;base64,'+src.replace(/\s/g,''):src;
+    if(/^(data:image\/|https:\/\/)/i.test(full))return {src:full,caption:String(value.caption||value.epigrafe||value['epígrafe']||value.legend||value.pie||'')};}
+   for(const v of Object.values(value)){const found=search(v);if(found)return found}
+  }
+  return null;
+ }
+ for(const group of groups){const result=search(group);if(result)return result}
+ return null;
+}
+async function showCase(c){const panel=$('casePanel');panel.classList.remove('hidden');panel.innerHTML='<button class="close secondary" id="closeCase">Cerrar ✕</button><p>Cargando caso…</p>';$('closeCase').onclick=()=>panel.classList.add('hidden');try{const r=await api('get',{id:c.workId}),d=r.submission;const image=firstCaseImage(d,c.key);panel.innerHTML=`<button class="close secondary" id="closeCase">Cerrar ✕</button><h3>${esc(c.name)}</h3><p>${esc(c.location)}</p>${image?`<img src="${esc(image.src)}" alt="Primera imagen del caso seleccionado">${image.caption?`<p class="muted">${esc(image.caption)}</p>`:''}`:'<p class="muted">Este caso no contiene imágenes.</p>'}<h4>${esc(c.title)}</h4><p>${esc(c.student)}</p><p>${esc(String(d.fields?.abstract||'').replace(/<[^>]+>/g,' '))}</p><button id="openFromCase">Abrir entrega</button>`;$('closeCase').onclick=()=>panel.classList.add('hidden');$('openFromCase').onclick=()=>{panel.classList.add('hidden');openWork(c.workId)}}catch(e){panel.innerHTML=`<button id="closeCase">Cerrar</button><p class="error">${esc(e.message)}</p>`;$('closeCase').onclick=()=>panel.classList.add('hidden')}}
+
 for(const id of ['sort','status','group'])$(id).addEventListener('change',render);$('search').addEventListener('input',render);$('teacher').addEventListener('change',()=>{updateGroups();render()});$('clearBib').onclick=()=>{bibChoice='';wordChoice='';render()};
 function rich(value){if(!window.DOMPurify)return esc(String(value||'').replace(/<[^>]*>/g,' '));return DOMPurify.sanitize(String(value||''),{ADD_TAGS:['figure','figcaption'],FORBID_TAGS:['button','input','textarea','script','style'],FORBID_ATTR:['contenteditable','onmousedown','onclick'],ALLOWED_URI_REGEXP:/^(?:(?:https?|mailto):|data:image\/(?:png|jpe?g|webp|gif);base64,|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i});}
 function makeSections(d){const fields=d.fields||{},titles=d.caseTitles||{},sections=[{key:'abstract',title:'Resumen',text:fields.abstract},{key:'intro',title:d.introTitle||'Introducción',text:fields.intro}];(d.subsections||[]).forEach((s,i)=>sections.push({key:'subsection_'+i,title:s.title||'Marco teórico',text:s.body||''}));for(const k of ['case1','case2','rosario','conclusion','references'])if(fields[k])sections.push({key:k,title:k==='conclusion'?'Conclusiones':k==='references'?'Bibliografía':titles[k]||labels[k],text:fields[k]});return sections;}
@@ -183,7 +244,7 @@ function openExit(){$('exitError').textContent='';$('exitDialog').classList.remo
 $('cancelExit').onclick=()=>{$('exitDialog').classList.add('hidden');exitTarget=null};$('discard').onclick=()=>{dirty=false;$('exitDialog').classList.add('hidden');const to=exitTarget;exitTarget=null;navigate(to)};
 $('saveExit').onclick=async()=>{if(await saveReview()){$('exitDialog').classList.add('hidden');const to=exitTarget;exitTarget=null;navigate(to)}else $('exitError').textContent=$('saveMessage')?.textContent||'No se pudieron guardar los cambios'};
 function payload(){const notes={},completed={};document.querySelectorAll('[data-note]').forEach(x=>notes[x.dataset.note]=x.value);document.querySelectorAll('[data-done]').forEach(x=>completed[x.dataset.done]=x.checked);return {groupOverride:groupNum($('editGroup')?.value ?? (correction.groupOverride ?? submission.group)),status:$('correctionStatus').value,grade:$('grade').value===''?null:Number($('grade').value),general:$('generalText').value,notes,completed}}
-async function saveReview(){if(!currentCanEdit)return false;const data=payload();if(!data.groupOverride){$('saveMessage').textContent='Indicá un número de grupo válido.';return false}if(data.status==='terminado'&&!data.grade){$('saveMessage').textContent='Para finalizar debés indicar una nota del 1 al 10.';return false}const b=$('saveCorrection'),restoreBusy=busyButton(b,'Guardando…');$('saveMessage').textContent='Guardando…';try{const d=await api('saveCorrection',{id:current,correction:data});correction=d.correction;states[current]=correction;const work=allWorks.find(w=>w.id===current);if(work)work.group=data.groupOverride;updateGroups();dirty=false;$('saveMessage').textContent='Corrección guardada';editing=false;const savedScroll=$('readerScroll').scrollTop;paintReader();$('readerScroll').scrollTop=savedScroll;$('reviewState').textContent=correction.status==='terminado'?`Terminado · Nota ${correction.grade}/10`:'En proceso';return true}catch(e){$('saveMessage').textContent=e.message;return false}finally{restoreBusy()}}
+async function saveReview(){if(!currentCanEdit)return false;const data=payload();if(!data.groupOverride){$('saveMessage').textContent='Indicá un número de grupo válido.';return false}if(data.status==='terminado'&&!data.grade){$('saveMessage').textContent='Para finalizar debés indicar una nota del 1 al 10.';return false}const b=$('saveCorrection'),restoreBusy=busyButton(b,'Guardando…');$('saveMessage').textContent='';try{const d=await api('saveCorrection',{id:current,correction:data});correction=d.correction;states[current]=correction;const work=allWorks.find(w=>w.id===current);if(work)work.group=data.groupOverride;updateGroups();dirty=false;$('saveMessage').textContent='Corrección guardada';editing=false;const savedScroll=$('readerScroll').scrollTop;paintReader();$('readerScroll').scrollTop=savedScroll;$('reviewState').textContent=correction.status==='terminado'?`Terminado · Nota ${correction.grade}/10`:'En proceso';return true}catch(e){$('saveMessage').textContent=e.message;return false}finally{restoreBusy()}}
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
 function compiled(c){return Object.entries(c.notes||{}).filter(([k,v])=>String(v||'').trim()).map(([k,v])=>`${labels[k]||(k.startsWith('subsection_')?'Marco teórico · '+k:k)}\n${v}`).join('\n\n')}
 function exportRows(){return visible().map(w=>{const c=states[w.id]||{};return [w.commission,effectiveGroup(w),w.student,c.grade??'',c.general||'',compiled(c)]})}
@@ -194,6 +255,7 @@ $('exportCSV').onclick=()=>{const restore=busyButton($('exportCSV'),'Exportando�
 function colName(i){let s='';for(i++;i;i=Math.floor((i-1)/26))s=String.fromCharCode(65+(i-1)%26)+s;return s}
 function xmlEscape(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c])).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g,'')}
 $('exportExcel').onclick=async()=>{const restore=busyButton($('exportExcel'),'Generando Excel…');try{if(!window.JSZip)throw Error('No se cargó JSZip');const rows=[headers,...exportRows()];const body=rows.map((row,j)=>`<row r="${j+1}">${row.map((v,i)=>`<c r="${colName(i)}${j+1}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(v)}</t></is></c>`).join('')}</row>`).join('');const zip=new JSZip();zip.file('[Content_Types].xml','<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>');zip.file('_rels/.rels','<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');zip.file('xl/workbook.xml','<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Correcciones 2026" sheetId="1" r:id="rId1"/></sheets></workbook>');zip.file('xl/_rels/workbook.xml.rels','<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>');zip.file('xl/worksheets/sheet1.xml',`<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData><autoFilter ref="A1:F${rows.length}"/></worksheet>`);const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE'});download(blob,'correcciones_2026.xlsx');$('exportMsg').textContent='Excel generado.'}catch(e){$('exportMsg').textContent=e.message}finally{restore()}};
+$('refreshBib').onclick=()=>{$('bibRefreshState').textContent='Actualizando índice bibliográfico…';$('buildButton').click()};
 $('buildButton').onclick=async()=>{
  const btn=$('buildButton'),restore=busyButton(btn,'Creando índice…');$('buildError').textContent='';
  let cursor=null;
@@ -201,11 +263,11 @@ $('buildButton').onclick=async()=>{
   do{
    const d=await api('rebuildIndex',cursor?{cursor}:{});
    cursor=d.cursor||null;
-   $('buildInfo').textContent=`Preparando índice en Drive… ${d.scanned||0} archivos examinados; ${d.found||0} entregas 2026 registradas.`;
+   $('buildInfo').textContent=`Preparando índice en Drive… ${d.scanned||0} archivos examinados; ${d.found||0} entregas 2026 registradas.`;$('bibRefreshState').textContent=$('buildInfo').textContent;
   }while(cursor);
   $('buildInfo').textContent='Índice creado. Cargando panel…';
-  await loadIndex();
- }catch(e){$('buildError').textContent='No se pudo completar la indexación: '+e.message+' Podés reintentar.';console.error(e)}
+  await loadIndex();$('bibRefreshState').textContent='Bibliografía actualizada desde los archivos originales.';
+ }catch(e){$('bibRefreshState').textContent='Error al actualizar: '+e.message;$('buildError').textContent='No se pudo completar la indexación: '+e.message+' Podés reintentar.';console.error(e)}
  finally{restore()}
 };
 if(session)loadIndex().catch(e=>console.warn('Sesión',e));
