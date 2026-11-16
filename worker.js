@@ -79,10 +79,16 @@ export default {
         const body=JSON.parse(raw);
         const actions=["login","logout","list","get","saveCorrection"];
         if(!body||!actions.includes(body.action))return reply({ok:false,error:"Acción inválida"},400);
-        const response=await fetch(env.APPS_SCRIPT_URL,{
-          method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=UTF-8"},
-          body:JSON.stringify({...body,token:env.APPS_SCRIPT_TOKEN})
-        });
+        const controller=new AbortController();
+        const timer=setTimeout(()=>controller.abort(),55000);
+        let response;
+        try{
+          response=await fetch(env.APPS_SCRIPT_URL,{
+            method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=UTF-8"},
+            signal:controller.signal,
+            body:JSON.stringify({...body,token:env.APPS_SCRIPT_TOKEN})
+          });
+        }finally{clearTimeout(timer)}
         const result=JSON.parse(await response.text());
         return reply(result,response.ok&&result.ok?200:400);
       }catch(error){return reply({ok:false,error:"Error en acceso docente: "+String(error.message||error)},502);}

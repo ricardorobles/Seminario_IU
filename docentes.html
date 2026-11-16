@@ -6,7 +6,7 @@
 </style></head><body>
 <header><div><h1>Seminarios IU · Panel docente</h1><span class="muted">Entregas 2026 · corrección y atlas de casos</span></div><div class="right"><span id="userLabel" class="muted"></span><a href="index.html">Editor de estudiantes</a><button id="logout" class="secondary hidden">Cerrar sesión</button></div></header>
 <div id="login" class="login-card"><h2>Acceso docente</h2><p class="muted">Ingresá tus credenciales asignadas. Las entregas y correcciones no son públicas.</p><form id="loginForm"><label for="username">Usuario</label><input id="username" required autocomplete="username"><label for="password">Contraseña</label><input id="password" type="password" required autocomplete="current-password"><div class="actions"><button type="submit">Ingresar</button></div></form><p class="error" id="loginError" aria-live="polite"></p></div>
-<div id="loading" class="hidden">Consultando las entregas de 2026 en Google Drive…</div>
+<div id="loading" class="hidden" role="status" aria-live="polite">Consultando las entregas de 2026 en Google Drive…</div>
 <div id="layout" class="hidden">
 <section class="pane"><div class="pane-head"><h2>Bibliografía citada</h2><p class="muted">Seleccioná una referencia para filtrar las entregas.</p><button id="clearBib" class="secondary">Quitar selección</button></div><div id="bib" class="pane-body"></div></section>
 <section class="pane"><div class="pane-head"><h2>Filtros y estadísticas</h2></div><div class="pane-body"><div class="field"><label for="teacher">Docente</label><select id="teacher"></select></div><div class="filter-grid"><div class="field"><label for="year">Año</label><select id="year"><option value="2026">2026</option></select></div><div class="field"><label for="group">Grupo</label><select id="group"></select></div></div><div class="field"><label for="search">Buscar por estudiante, título o caso</label><input id="search" placeholder="Buscar…"></div><div class="filter-grid"><div class="field"><label for="sort">Ordenar</label><select id="sort"><option value="student">Estudiante</option><option value="title">Título</option><option value="date">Fecha reciente</option></select></div><div class="field"><label for="status">Estado</label><select id="status"><option value="">Todos</option><option value="pendiente">Por corregir</option><option value="en_proceso">En proceso</option><option value="terminado">Terminado</option></select></div></div><div class="counters"><div class="counter"><strong id="totalWorks">0</strong>Entregas</div><div class="counter"><strong id="average">0</strong>Palabras promedio</div><div class="counter"><strong id="totalCases">0</strong>Casos</div><div class="counter"><strong id="geocases">0</strong>Geolocalizados</div></div><h2>Nube de títulos</h2><div id="cloud"></div></div></section>
@@ -27,7 +27,16 @@ const groupNum=s=>String(Number(String(s||'').replace(/\D/g,''))||'')||'';
 const labels={abstract:'Resumen',intro:'Introducción',case1:'Caso de estudio 1',case2:'Caso de estudio 2',rosario:'Rosario',conclusion:'Conclusiones',references:'Bibliografía'};
 const storage='seminarios-iu-web-filtros-2026';
 let currentCanEdit=false;let session=sessionStorage.getItem('iu_session')||'',profile=null,allWorks=[],states={},map=null,markers=null,bibChoice='',wordChoice='',current=null,submission=null,correction=null,dirty=false,editing=false,exitTarget=null,openedOrder=[];
-async function api(action,payload={}){const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({action,session,...payload})});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Error de servidor');return d;}
+async function api(action,payload={}){
+ const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),65000);
+ try{
+  const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',signal:controller.signal,body:JSON.stringify({action,session,...payload})});
+  const raw=await r.text();let d;
+  try{d=JSON.parse(raw)}catch(e){throw Error('El servidor devolvió una respuesta inválida (HTTP '+r.status+'). Revisá el Worker y Apps Script.')}
+  if(!r.ok||!d.ok)throw Error(d.error||'Error del servidor (HTTP '+r.status+')');return d;
+ }catch(e){if(e.name==='AbortError')throw Error('La consulta superó el tiempo permitido. Podés reintentar; no se modificaron las entregas.');throw e}
+ finally{clearTimeout(timeout)}
+}
 function filters(){return {teacher:$('teacher').value,group:$('group').value,sort:$('sort').value,status:$('status').value,search:$('search').value,bibChoice,wordChoice}}
 function persist(){try{localStorage.setItem(storage,JSON.stringify(filters()))}catch(e){}}
 function saved(){try{return JSON.parse(localStorage.getItem(storage)||'{}')}catch(e){return {}}}
@@ -36,7 +45,20 @@ $('loginForm').addEventListener('submit',async e=>{e.preventDefault();const btn=
 $('logout').addEventListener('click',async()=>{try{await api('logout')}catch(e){}session='';sessionStorage.removeItem('iu_session');location.reload()});
 async function loadIndex(){
  $('loading').classList.remove('hidden');$('login').classList.add('hidden');
- try{const d=await api('list');profile=d.profile;allWorks=d.works||[];states=d.corrections||{};
+ try{
+  const collected=[],changes={};let cursor=null,batches=0,scannedTotal=0;
+  do{
+    const d=await api('list',cursor?{cursor}:{});
+    profile=d.profile;
+    collected.push(...(d.works||[]));Object.assign(changes,d.corrections||{});
+    cursor=d.cursor||null;batches++;scannedTotal+=Number(d.scanned||0);
+    $('loading').textContent='Consultando Google Drive… '+scannedTotal+' archivos examinados, '+collected.length+' entregas 2026 encontradas.';
+    if(batches>800)throw Error('La carpeta contiene demasiados archivos para esta consulta.');
+  }while(cursor);
+  // Un único trabajo (la entrega más reciente) por estudiante y docente.
+  const latest=new Map();for(const w of collected){const key=norm(w.student)+'|'+norm(w.commission)+'|2026';if(!latest.has(key)||w.modified>latest.get(key).modified)latest.set(key,w)}
+  allWorks=[...latest.values()];states={};for(const w of allWorks)if(changes[w.id])states[w.id]=changes[w.id];
+  $('loading').textContent='Entregas cargadas.';
  $('userLabel').textContent=profile.display;$('logout').classList.remove('hidden');
  const ts=[...new Set(allWorks.map(w=>w.commission))].sort((a,b)=>a.localeCompare(b,'es'));
  $('teacher').innerHTML='<option value="">Todos los docentes</option>'+ts.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
@@ -46,7 +68,7 @@ async function loadIndex(){
  bibChoice=s.bibChoice||'';wordChoice=s.wordChoice||'';
  updateGroups();if([...$('group').options].some(o=>o.value===s.group))$('group').value=s.group;
  $('layout').classList.remove('hidden');initMap();render();
- }catch(e){if(/sesión|iniciá sesión|vencida/i.test(e.message)){session='';sessionStorage.removeItem('iu_session')}$('login').classList.remove('hidden');$('loginError').textContent=e.message;throw e}finally{$('loading').classList.add('hidden')}
+ }catch(e){if(/sesión|iniciá sesión|vencida/i.test(e.message)){session='';sessionStorage.removeItem('iu_session')}$('login').classList.remove('hidden');$('loginError').textContent='No se pudo cargar el listado: '+e.message+' Podés volver a ingresar para reintentar.';console.error('Carga de entregas:',e);throw e}finally{$('loading').classList.add('hidden');$('loading').textContent='Consultando las entregas de 2026 en Google Drive…'}
 }
 function updateGroups(){const t=$('teacher').value,old=$('group').value;const groups=[...new Set(allWorks.filter(w=>!t||w.commission===t).map(w=>w.group).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));$('group').innerHTML='<option value="">Todos los grupos</option>'+groups.map(g=>`<option value="${esc(g)}">${esc(g)}</option>`).join('');if(groups.includes(old))$('group').value=old;}
 function visible(){const f=filters(),q=norm(f.search);return allWorks.filter(w=>(!f.teacher||w.commission===f.teacher)&&(!f.group||w.group===f.group)&&(!f.status||(states[w.id]?.status||'pendiente')===f.status)&&(!bibChoice||w.bibliography.some(b=>norm(b)===bibChoice))&&(!wordChoice||norm(w.title).split(/[^\p{L}]+/u).includes(wordChoice))&&norm([w.student,w.title,w.commission,w.cases.map(c=>c.name).join(' ')].join(' ')).includes(q)).sort((a,b)=>f.sort==='date'?b.modified-a.modified:f.sort==='title'?a.title.localeCompare(b.title,'es'):a.student.localeCompare(b.student,'es'))}
