@@ -296,31 +296,99 @@ function highlightComments(root,items){
   const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let n,pos=0,start=null,end=null;
   while(n=walker.nextNode()){const next=pos+n.textContent.length;if(start===null&&c.start>=pos&&c.start<next)start=[n,c.start-pos];if(c.end>pos&&c.end<=next){end=[n,c.end-pos];break}pos=next;}
   if(!start||!end)continue;
-  try{const range=document.createRange();range.setStart(...start);range.setEnd(...end);const mark=document.createElement('mark');mark.className='comment-highlight';mark.dataset.commentId=c.id;mark.dataset.commentKey=root.closest('.section').dataset.key;range.surroundContents(mark)}catch(e){/* El fragmento cruza etiquetas; se conserva el comentario en el margen. */}
+  try{const range=document.createRange();range.setStart(...start);range.setEnd(...end);const mark=document.createElement('mark');mark.className='comment-highlight';mark.dataset.commentId=c.id;mark.dataset.commentKey=root.closest('.section').dataset.key;mark.appendChild(range.extractContents());range.insertNode(mark)}catch(e){/* El comentario sigue disponible en el margen. */}
  }
 }
-function setupComments(){
- document.querySelectorAll('.section').forEach(section=>{
-  if(section.dataset.commentsBound==='1')return;section.dataset.commentsBound='1';
-  const key=section.dataset.key,root=section.querySelector('.text-content');highlightComments(root,commentsFor(key));
-  section.querySelector('[data-add-comment]')?.addEventListener('click',()=>startComment(section));
-  section.querySelector('[data-cancel-comment]')?.addEventListener('click',()=>section.querySelector('.comment-compose').classList.add('hidden'));
-  section.querySelector('[data-publish-comment]')?.addEventListener('click',()=>publishComment(section));
-  section.querySelectorAll('[data-edit-comment]').forEach(b=>b.onclick=()=>startComment(section,b.dataset.editComment));
-  section.querySelectorAll('[data-delete-comment]').forEach(b=>b.onclick=()=>{if(!confirm('¿Eliminar este comentario?'))return;const id=b.dataset.deleteComment;correction.notes[key]=JSON.stringify({type:'inline-comments',items:commentsFor(key).filter(c=>c.id!==id)});dirty=true;refreshSectionComments(section)});
-  section.querySelectorAll('.comment-card,.comment-highlight').forEach(el=>el.addEventListener('click',()=>focusComment(key,el.dataset.commentId)));
+// La selección se conserva al hacer clic en un botón fuera del texto.
+const selectedCommentRanges=new WeakMap();
+function rememberCommentSelection(section){
+ if(!editing)return;
+ const root=section.querySelector('.text-content'),sel=window.getSelection();
+ if(!root||!sel||sel.isCollapsed||!sel.rangeCount)return;
+ const range=sel.getRangeAt(0);
+ if(!root.contains(range.startContainer)||!root.contains(range.endContainer))return;
+ selectedCommentRanges.set(section,{
+  quote:range.toString(),
+  start:textOffset(root,range.startContainer,range.startOffset),
+  end:textOffset(root,range.endContainer,range.endOffset)
  });
 }
-function focusComment(key,id){document.querySelectorAll('.comment-card,.comment-highlight').forEach(el=>el.classList.toggle(el.classList.contains('comment-card')?'active':'selected-comment',el.dataset.commentKey===key&&el.dataset.commentId===id));const card=[...document.querySelectorAll('.comment-card')].find(el=>el.dataset.commentKey===key&&el.dataset.commentId===id);card?.scrollIntoView({block:'nearest',behavior:'smooth'});}
+function activeCommentPanel(section){return section.querySelector(editing?'.review-box':'.review-view');}
+function setupComments(){
+ document.querySelectorAll('.section').forEach(section=>{
+  if(section.dataset.commentsBound==='1')return;
+  section.dataset.commentsBound='1';
+  const root=section.querySelector('.text-content');
+  highlightComments(root,commentsFor(section.dataset.key));
+  root.addEventListener('mouseup',()=>rememberCommentSelection(section));
+  root.addEventListener('keyup',()=>rememberCommentSelection(section));
+  // Delegación: el panel de lectura y el de edición tienen botones independientes.
+  section.addEventListener('click',event=>{
+   const button=event.target.closest('button');
+   if(button&&!section.contains(button))return;
+   if(button?.matches('[data-add-comment]')){event.preventDefault();startComment(section);return;}
+   if(button?.matches('[data-cancel-comment]')){event.preventDefault();button.closest('.comment-compose')?.classList.add('hidden');return;}
+   if(button?.matches('[data-publish-comment]')){event.preventDefault();publishComment(section,button.closest('.comment-compose'));return;}
+   if(button?.matches('[data-edit-comment]')){event.preventDefault();startComment(section,button.dataset.editComment);return;}
+   if(button?.matches('[data-delete-comment]')){
+    event.preventDefault();
+    if(!confirm('¿Eliminar este comentario?'))return;
+    const key=section.dataset.key,id=button.dataset.deleteComment;
+    correction.notes[key]=JSON.stringify({type:'inline-comments',items:commentsFor(key).filter(c=>c.id!==id)});
+    dirty=true;refreshSectionComments(section);return;
+   }
+   const target=event.target.closest('.comment-card,.comment-highlight');
+   if(target&&section.contains(target))focusComment(section.dataset.key,target.dataset.commentId);
+  });
+ });
+}
+function focusComment(key,id){
+ document.querySelectorAll('.comment-card,.comment-highlight').forEach(el=>el.classList.toggle(el.classList.contains('comment-card')?'active':'selected-comment',el.dataset.commentKey===key&&el.dataset.commentId===id));
+ const card=[...document.querySelectorAll('.comment-card')].find(el=>el.dataset.commentKey===key&&el.dataset.commentId===id&&!el.closest('.hidden'));
+ card?.scrollIntoView({block:'nearest',behavior:'smooth'});
+}
 function startComment(section,id=null){
  if(!editing)return;
- const key=section.dataset.key,root=section.querySelector('.text-content'),compose=section.querySelector('.comment-compose');let selection=window.getSelection(),range=selection&&selection.rangeCount?selection.getRangeAt(0):null;
+ const key=section.dataset.key, panel=activeCommentPanel(section);
+ const compose=panel?.querySelector('.comment-compose');
+ if(!compose)return;
  let draft=id?commentsFor(key).find(c=>c.id===id):null;
- if(!draft){if(!range||range.collapsed||!root.contains(range.commonAncestorContainer)){alert('Seleccioná primero un fragmento del texto de este apartado.');return}draft={id:'c'+Date.now()+'_'+Math.random().toString(36).slice(2,7),quote:range.toString(),start:textOffset(root,range.startContainer,range.startOffset),end:textOffset(root,range.endContainer,range.endOffset)};}
- compose.dataset.draft=JSON.stringify(draft);compose.querySelector('.quote').textContent=draft.quote?'“'+draft.quote+'”':'Comentario anterior sin fragmento vinculado';compose.querySelector('textarea').value=draft.text||'';compose.classList.remove('hidden');compose.querySelector('textarea').focus();
+ if(!draft){
+  rememberCommentSelection(section);
+  const selection=selectedCommentRanges.get(section);
+  if(!selection||!selection.quote.trim()||selection.end<=selection.start){
+   alert('Seleccioná primero un fragmento del texto de este apartado.');return;
+  }
+  draft={id:'c'+Date.now()+'_'+Math.random().toString(36).slice(2,7),...selection};
+ }
+ compose.dataset.draft=JSON.stringify(draft);
+ compose.querySelector('.quote').textContent=draft.quote?'“'+draft.quote+'”':'Comentario anterior sin fragmento vinculado';
+ compose.querySelector('textarea').value=draft.text||'';
+ compose.classList.remove('hidden');
+ compose.querySelector('textarea').focus();
+ compose.scrollIntoView({block:'nearest',behavior:'smooth'});
 }
-function publishComment(section){const compose=section.querySelector('.comment-compose'),text=compose.querySelector('textarea').value.trim();if(!text)return;const key=section.dataset.key,draft=JSON.parse(compose.dataset.draft),items=commentsFor(key),index=items.findIndex(c=>c.id===draft.id);const item={...draft,text,author:draft.author||profile?.name||profile?.user||'Docente',date:draft.date||new Date().toLocaleString('es-AR')};if(index>=0)items[index]=item;else items.push(item);correction.notes[key]=JSON.stringify({type:'inline-comments',items});dirty=true;compose.classList.add('hidden');refreshSectionComments(section);}
-function refreshSectionComments(section){const key=section.dataset.key;section.querySelector('.review-view .comment-content')?.replaceChildren();const holder=section.querySelector('.review-view .comment-content');if(holder)holder.innerHTML=sectionComments(key);const box=section.querySelector('.review-box .comment-content');if(box)box.innerHTML=sectionComments(key);const root=section.querySelector('.text-content');root.innerHTML=rich(makeSections(submission).find(s=>s.key===key)?.text);section.dataset.commentsBound='';setupComments();updateCompiled();}
+function publishComment(section,compose){
+ if(!compose?.dataset.draft)return;
+ const text=compose.querySelector('textarea').value.trim();
+ if(!text){compose.querySelector('textarea').focus();return;}
+ const key=section.dataset.key,draft=JSON.parse(compose.dataset.draft),items=commentsFor(key),index=items.findIndex(c=>c.id===draft.id);
+ const item={...draft,text,author:draft.author||profile?.display||profile?.user||'Docente',date:draft.date||new Date().toLocaleString('es-AR')};
+ if(index>=0)items[index]=item;else items.push(item);
+ correction.notes[key]=JSON.stringify({type:'inline-comments',items});
+ dirty=true;selectedCommentRanges.delete(section);
+ compose.classList.add('hidden');refreshSectionComments(section);
+}
+function refreshSectionComments(section){
+ const key=section.dataset.key;
+ for(const panel of section.querySelectorAll('.review-view,.review-box')){
+  const holder=panel.querySelector('.comment-content');if(holder)holder.innerHTML=sectionComments(key);
+ }
+ const root=section.querySelector('.text-content');
+ root.innerHTML=rich(makeSections(submission).find(s=>s.key===key)?.text);
+ highlightComments(root,commentsFor(key));
+ updateCompiled();
+}
 
 function makeSections(d){const fields=d.fields||{},titles=d.caseTitles||{},sections=[{key:'abstract',title:'Resumen',text:fields.abstract},{key:'intro',title:d.introTitle||'Introducción',text:fields.intro}];(d.subsections||[]).forEach((s,i)=>sections.push({key:'subsection_'+i,title:s.title||'Marco teórico',text:s.body||''}));for(const k of ['case1','case2','rosario','conclusion','references'])if(fields[k])sections.push({key:k,title:k==='conclusion'?'Conclusiones':k==='references'?'Bibliografía':titles[k]||labels[k],text:fields[k]});return sections;}
 async function openWork(id,sourceButton=null){const restore=busyButton(sourceButton,sourceButton?.id==='next'||sourceButton?.id==='prev'?'Cambiando de trabajo…':'Abriendo entrega…');try{const r=await api('get',{id});current=id;submission=r.submission;correction=r.correction||{status:'pendiente',grade:null,notes:{},completed:{},general:''};currentCanEdit=!!r.canEdit;dirty=false;editing=false;$('review').classList.remove('hidden');paintReader();updateNav();}catch(e){alert('No se pudo abrir: '+e.message)}finally{restore()}}
