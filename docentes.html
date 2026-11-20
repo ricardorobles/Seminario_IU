@@ -64,6 +64,19 @@ button.is-busy:before{content:'◌';display:inline-block;margin-right:6px;animat
 .paper>#general{background:white;border:1px solid var(--line);border-radius:10px;padding:22px 27px;margin-top:16px}
 @media(max-width:850px){.paper>.section{grid-template-columns:1fr}.paper>.section>.review-view,.paper>.section>.review-box{grid-column:1;position:static;max-height:none}.paper>.section>.reading-box{padding:18px}.paper>.group-editor{max-width:none;width:100%}}
 .rebuild-index-actions{display:flex;justify-content:flex-start;margin:0 0 13px}.rebuild-index-actions button{font-weight:700;font-size:11px;padding:9px 12px;background:#e8eff2;color:#23536a;border:1px solid #cbdce3}.rebuild-index-actions button:hover{background:#dcebf0}.rebuild-index-actions button.is-busy{background:#d5e6ec;color:#214c60}
+
+/* Comentarios anclados a fragmentos, estilo procesador de texto */
+.paper .section{grid-template-columns:minmax(0,1fr) minmax(245px,320px)}
+.comment-highlight{background:#dce6ff;box-shadow:inset 0 -2px #6487eb;cursor:pointer;border-radius:2px}
+.comment-highlight.selected-comment{background:#b8cbff;outline:1px solid #5277d9}
+.comment-card{background:#fff;border:1px solid #cdd8e6;border-radius:8px;padding:11px;margin:9px 0;box-shadow:0 2px 8px #0000000c;cursor:pointer;overflow-wrap:anywhere}
+.comment-card.active{border-color:#4778d5;box-shadow:0 0 0 2px #a9c4fa}
+.comment-card .quote{font-size:11px;color:#466180;border-left:3px solid #91a9ed;padding-left:8px;margin:8px 0}
+.comment-card .author{font-weight:800;font-size:11px}.comment-card .date{font-size:10px;color:#78868c;margin-left:7px}
+.comment-card p{white-space:pre-wrap;margin:8px 0}.comment-card button{padding:5px 8px;font-size:10px;margin-right:5px}
+.comment-toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:8px 0}.comment-toolbar button{font-size:11px}
+.comment-compose{background:#f4f7ff;border:1px solid #aac1fa;border-radius:8px;padding:10px;margin:8px 0}
+.comment-compose textarea{min-height:85px}.comment-compose .quote{font-size:11px;color:#45618a}
 </style></head><body>
 <header><div><h1>Seminarios IU · Panel docente</h1><span class="muted">Entregas 2026 · corrección y atlas de casos</span></div><div class="right"><span id="userLabel" class="muted"></span><a href="index.html">Editor de estudiantes</a><button id="logout" class="secondary hidden">Cerrar sesión</button></div></header>
 <div id="login" class="login-card"><h2>Acceso docente</h2><p class="muted">Ingresá tus credenciales asignadas. Las entregas y correcciones no son públicas.</p><form id="loginForm"><label for="username">Usuario</label><input id="username" required autocomplete="username"><label for="password">Contraseña</label><input id="password" type="password" required autocomplete="current-password"><div class="actions"><button type="submit">Ingresar</button></div></form><p class="error" id="loginError" aria-live="polite"></p></div>
@@ -265,16 +278,60 @@ function rich(value){
  nodes.forEach(n=>n.remove());
  return wrapper.innerHTML.replace(/(<\/figure>)(?:\s|&nbsp;)*(?:[×✕]\s*)?Eliminar figura\b/gi,'$1');
 }
+
+function parseComments(value){
+ if(Array.isArray(value))return value;
+ if(!value)return [];
+ try{const v=JSON.parse(value);if(v&&v.type==='inline-comments'&&Array.isArray(v.items))return v.items}catch(e){}
+ return [{id:'legacy',quote:'',text:String(value),author:'Observación anterior',date:'',legacy:true}];
+}
+function commentsFor(key){return parseComments(correction.notes?.[key]);}
+function commentsHTML(key){return commentsFor(key).map(c=>`<article class="comment-card" data-comment-id="${esc(c.id)}" data-comment-key="${esc(key)}"><div><span class="author">${esc(c.author||'Docente')}</span><span class="date">${esc(c.date||'')}</span></div>${c.quote?`<div class="quote">“${esc(c.quote)}”</div>`:''}<p>${esc(c.text)}</p>${editing?`<button type="button" class="secondary" data-edit-comment="${esc(c.id)}">Editar</button><button type="button" class="secondary" data-delete-comment="${esc(c.id)}">Eliminar</button>`:''}</article>`).join('');}
+function sectionComments(key){return `<div class="comment-toolbar">${editing?'<button type="button" class="secondary" data-add-comment>+ Comentar selección</button>':''}<span class="muted">${commentsFor(key).length} comentario(s)</span></div><div class="comment-list">${commentsHTML(key)||'<span class="no-note">Sin comentarios</span>'}</div><div class="comment-compose hidden"><div class="quote"></div><textarea placeholder="Escribí el comentario sobre el fragmento seleccionado"></textarea><div class="actions"><button type="button" data-publish-comment>Publicar</button><button type="button" class="secondary" data-cancel-comment>Cancelar</button></div></div>`;}
+function textOffset(root,node,offset){const r=document.createRange();r.selectNodeContents(root);r.setEnd(node,offset);return r.toString().length;}
+function highlightComments(root,items){
+ // Recorrer de atrás hacia adelante para conservar offsets del texto original.
+ const valid=items.filter(c=>Number.isInteger(c.start)&&Number.isInteger(c.end)&&c.end>c.start).sort((a,b)=>b.start-a.start);
+ for(const c of valid){
+  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let n,pos=0,start=null,end=null;
+  while(n=walker.nextNode()){const next=pos+n.textContent.length;if(start===null&&c.start>=pos&&c.start<next)start=[n,c.start-pos];if(c.end>pos&&c.end<=next){end=[n,c.end-pos];break}pos=next;}
+  if(!start||!end)continue;
+  try{const range=document.createRange();range.setStart(...start);range.setEnd(...end);const mark=document.createElement('mark');mark.className='comment-highlight';mark.dataset.commentId=c.id;mark.dataset.commentKey=root.closest('.section').dataset.key;range.surroundContents(mark)}catch(e){/* El fragmento cruza etiquetas; se conserva el comentario en el margen. */}
+ }
+}
+function setupComments(){
+ document.querySelectorAll('.section').forEach(section=>{
+  if(section.dataset.commentsBound==='1')return;section.dataset.commentsBound='1';
+  const key=section.dataset.key,root=section.querySelector('.text-content');highlightComments(root,commentsFor(key));
+  section.querySelector('[data-add-comment]')?.addEventListener('click',()=>startComment(section));
+  section.querySelector('[data-cancel-comment]')?.addEventListener('click',()=>section.querySelector('.comment-compose').classList.add('hidden'));
+  section.querySelector('[data-publish-comment]')?.addEventListener('click',()=>publishComment(section));
+  section.querySelectorAll('[data-edit-comment]').forEach(b=>b.onclick=()=>startComment(section,b.dataset.editComment));
+  section.querySelectorAll('[data-delete-comment]').forEach(b=>b.onclick=()=>{if(!confirm('¿Eliminar este comentario?'))return;const id=b.dataset.deleteComment;correction.notes[key]=JSON.stringify({type:'inline-comments',items:commentsFor(key).filter(c=>c.id!==id)});dirty=true;refreshSectionComments(section)});
+  section.querySelectorAll('.comment-card,.comment-highlight').forEach(el=>el.addEventListener('click',()=>focusComment(key,el.dataset.commentId)));
+ });
+}
+function focusComment(key,id){document.querySelectorAll('.comment-card,.comment-highlight').forEach(el=>el.classList.toggle(el.classList.contains('comment-card')?'active':'selected-comment',el.dataset.commentKey===key&&el.dataset.commentId===id));const card=[...document.querySelectorAll('.comment-card')].find(el=>el.dataset.commentKey===key&&el.dataset.commentId===id);card?.scrollIntoView({block:'nearest',behavior:'smooth'});}
+function startComment(section,id=null){
+ if(!editing)return;
+ const key=section.dataset.key,root=section.querySelector('.text-content'),compose=section.querySelector('.comment-compose');let selection=window.getSelection(),range=selection&&selection.rangeCount?selection.getRangeAt(0):null;
+ let draft=id?commentsFor(key).find(c=>c.id===id):null;
+ if(!draft){if(!range||range.collapsed||!root.contains(range.commonAncestorContainer)){alert('Seleccioná primero un fragmento del texto de este apartado.');return}draft={id:'c'+Date.now()+'_'+Math.random().toString(36).slice(2,7),quote:range.toString(),start:textOffset(root,range.startContainer,range.startOffset),end:textOffset(root,range.endContainer,range.endOffset)};}
+ compose.dataset.draft=JSON.stringify(draft);compose.querySelector('.quote').textContent=draft.quote?'“'+draft.quote+'”':'Comentario anterior sin fragmento vinculado';compose.querySelector('textarea').value=draft.text||'';compose.classList.remove('hidden');compose.querySelector('textarea').focus();
+}
+function publishComment(section){const compose=section.querySelector('.comment-compose'),text=compose.querySelector('textarea').value.trim();if(!text)return;const key=section.dataset.key,draft=JSON.parse(compose.dataset.draft),items=commentsFor(key),index=items.findIndex(c=>c.id===draft.id);const item={...draft,text,author:draft.author||profile?.name||profile?.user||'Docente',date:draft.date||new Date().toLocaleString('es-AR')};if(index>=0)items[index]=item;else items.push(item);correction.notes[key]=JSON.stringify({type:'inline-comments',items});dirty=true;compose.classList.add('hidden');refreshSectionComments(section);}
+function refreshSectionComments(section){const key=section.dataset.key;section.querySelector('.review-view .comment-content')?.replaceChildren();const holder=section.querySelector('.review-view .comment-content');if(holder)holder.innerHTML=sectionComments(key);const box=section.querySelector('.review-box .comment-content');if(box)box.innerHTML=sectionComments(key);const root=section.querySelector('.text-content');root.innerHTML=rich(makeSections(submission).find(s=>s.key===key)?.text);section.dataset.commentsBound='';setupComments();updateCompiled();}
+
 function makeSections(d){const fields=d.fields||{},titles=d.caseTitles||{},sections=[{key:'abstract',title:'Resumen',text:fields.abstract},{key:'intro',title:d.introTitle||'Introducción',text:fields.intro}];(d.subsections||[]).forEach((s,i)=>sections.push({key:'subsection_'+i,title:s.title||'Marco teórico',text:s.body||''}));for(const k of ['case1','case2','rosario','conclusion','references'])if(fields[k])sections.push({key:k,title:k==='conclusion'?'Conclusiones':k==='references'?'Bibliografía':titles[k]||labels[k],text:fields[k]});return sections;}
 async function openWork(id,sourceButton=null){const restore=busyButton(sourceButton,sourceButton?.id==='next'||sourceButton?.id==='prev'?'Cambiando de trabajo…':'Abriendo entrega…');try{const r=await api('get',{id});current=id;submission=r.submission;correction=r.correction||{status:'pendiente',grade:null,notes:{},completed:{},general:''};currentCanEdit=!!r.canEdit;dirty=false;editing=false;$('review').classList.remove('hidden');paintReader();updateNav();}catch(e){alert('No se pudo abrir: '+e.message)}finally{restore()}}
 function paintReader(){
  const d=submission,sections=makeSections(d),effectiveCurrentGroup=groupNum(correction.groupOverride ?? d.group);
  $('readerPaper').innerHTML=`<h1>${esc(String(d.fields?.title||''))}</h1><p class="muted">${esc(d.student)} · ${esc(d.commission)} · Grupo ${esc(effectiveCurrentGroup)} · 2026</p>`+(editing?`<div class="group-editor"><label for="editGroup">Número de grupo<input id="editGroup" inputmode="numeric" maxlength="7" value="${esc(effectiveCurrentGroup)}" placeholder="Ej. 24"></label><span class="muted">La corrección modifica el grupo usado en el panel y las exportaciones, sin alterar el JSON original del estudiante.</span></div>`:'')+
- sections.map((s,i)=>{const note=String(correction.notes?.[s.key]||'').trim();const done=!!correction.completed?.[s.key];return `<section class="section" id="part-${i}" data-key="${esc(s.key)}"><div class="reading-box"><h2>${esc(s.title)}</h2><div class="text-content">${rich(s.text)}</div></div><div class="review-view ${editing?'hidden':''}"><span class="review-label">Observaciones del apartado ${done?'<span class="mark">✓ Corregido</span>':''}</span>${note?esc(note):'<span class="no-note">Sin observaciones registradas</span>'}</div><div class="review-box ${editing?'':'hidden'}"><label><input style="width:auto" type="checkbox" data-done="${esc(s.key)}" ${done?'checked':''}> Apartado corregido</label><label for="note-${i}">Observaciones del apartado</label><textarea data-note="${esc(s.key)}" id="note-${i}">${esc(correction.notes?.[s.key]||'')}</textarea></div></section>`}).join('')+
+ sections.map((s,i)=>{const done=!!correction.completed?.[s.key];return `<section class="section" id="part-${i}" data-key="${esc(s.key)}"><div class="reading-box"><h2>${esc(s.title)}</h2><div class="text-content">${rich(s.text)}</div></div><div class="review-view ${editing?'hidden':''}"><span class="review-label">Comentarios del apartado ${done?'<span class="mark">✓ Corregido</span>':''}</span><div class="comment-content">${sectionComments(s.key)}</div></div><div class="review-box ${editing?'':'hidden'}"><label><input style="width:auto" type="checkbox" data-done="${esc(s.key)}" ${done?'checked':''}> Apartado corregido</label><div class="comment-content">${sectionComments(s.key)}</div></div></section>`}).join('')+
  `<section id="general"><h2>Observaciones y calificación</h2><div class="read-general ${editing?'hidden':''}"><h3>Observaciones generales</h3><p>${esc(correction.general||'Sin observaciones generales registradas')}</p><h3>Observaciones parciales compiladas</h3><p>${esc(compiled(correction)||'Sin observaciones parciales registradas')}</p><p class="meta">Estado: ${correctionStatus(correction)==='terminado'?'Terminado de corregir':correctionStatus(correction)==='en_proceso'?'En proceso':'Por corregir'} · Nota: ${correction.grade?esc(correction.grade)+'/10':'Sin nota'}</p></div><div id="generalEditor" class="${editing?'':'hidden'}"><div class="general-cols"><div><label>Observaciones generales</label><textarea id="generalText">${esc(correction.general||'')}</textarea></div><div><label>Observaciones parciales compiladas</label><textarea id="compiled" readonly></textarea></div></div><div class="review-controls"><label>Nota (1 a 10)<select id="grade"><option value="">Sin nota</option>${Array.from({length:10},(_,i)=>`<option value="${i+1}" ${Number(correction.grade)===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label><label>Estado<select id="correctionStatus"><option value="en_proceso" ${correction.status==='terminado'?'':'selected'}>En proceso</option><option value="terminado" ${correction.status==='terminado'?'selected':''}>Terminado de corregir</option></select></label><button id="saveCorrection">Guardar corrección</button><span id="saveMessage" role="status"></span></div></div></section>`;
  $('tocLinks').innerHTML='<a href="#readerTop" id="tocTop">Inicio</a>'+sections.map((s,i)=>`<a href="#part-${i}" data-check="${esc(s.key)}" class="${s.key==='intro'?'section-parent':s.key.startsWith('subsection_')?'section-sub':''}"><span class="toc-tick" aria-hidden="true"></span><span>${esc(s.title)}</span></a>`).join('')+'<div class="toc-divider"></div><a href="#general" id="tocGeneral">Observaciones generales</a>';
  $('tocTop').onclick=e=>{e.preventDefault();$('readerScroll').scrollTop=0};$('tocLinks').querySelectorAll('a[href^="#part"]').forEach(a=>a.onclick=e=>{e.preventDefault();$(a.hash.slice(1)).scrollIntoView({behavior:'smooth'})});$('tocGeneral').onclick=e=>{e.preventDefault();$('general').scrollIntoView({behavior:'smooth'})};
- setupReadingSectionTracker();
+ setupReadingSectionTracker();setupComments();
  $('reviewState').textContent=correctionStatus(correction)==='terminado'?`Terminado · Nota ${correction.grade}/10`:correctionStatus(correction)==='en_proceso'?'En proceso':'Por corregir';
  $('editMode').classList.toggle('hidden',!currentCanEdit);$('editMode').textContent=editing?'✎ Editando':'✎ Editar';$('saveCorrection').onclick=saveReview;
  $('readerPaper').querySelectorAll('[data-note], [data-done], #generalText, #grade, #correctionStatus, #editGroup').forEach(el=>el.addEventListener(el.matches('[data-note],#generalText,#editGroup')?'input':'change',()=>{dirty=true;updateCompiled();updateChecks()}));updateCompiled();updateChecks();if(!editing)$('readerScroll').scrollTop=0;
@@ -316,7 +373,7 @@ function setupReadingSectionTracker(){
  }
  requestAnimationFrame(updateReadingSection);
 }
-function updateCompiled(){const target=$('compiled');if(!target)return;target.value=[...document.querySelectorAll('[data-note]')].filter(x=>x.value.trim()).map(x=>{const s=x.closest('.section');return s.querySelector('h2').textContent+'\n'+x.value.trim()}).join('\n\n────────────\n\n');}
+function updateCompiled(){const target=$('compiled');if(!target)return;target.value=compiled(correction);}
 function updateChecks(){document.querySelectorAll('[data-check]').forEach(a=>{const box=[...document.querySelectorAll('[data-done]')].find(x=>x.dataset.done===a.dataset.check);a.classList.toggle('checked',box?!!box.checked:!!correction.completed?.[a.dataset.check])})}
 function toggleEdit(){if(!currentCanEdit)return;if(editing&&dirty){exitTarget='edit';openExit();return}const scroll=$('readerScroll').scrollTop;editing=!editing;paintReader();$('readerScroll').scrollTop=scroll;}
 $('editMode').onclick=toggleEdit;
@@ -336,10 +393,10 @@ $('saveExit').onclick=async()=>{
   }else $('exitError').textContent=$('saveMessage')?.textContent||'No se pudieron guardar los cambios';
  }finally{release()}
 };
-function payload(){const notes={},completed={};document.querySelectorAll('[data-note]').forEach(x=>notes[x.dataset.note]=x.value);document.querySelectorAll('[data-done]').forEach(x=>completed[x.dataset.done]=x.checked);return {groupOverride:groupNum($('editGroup')?.value ?? (correction.groupOverride ?? submission.group)),status:$('correctionStatus').value,grade:$('grade').value===''?null:Number($('grade').value),general:$('generalText').value,notes,completed}}
+function payload(){const notes={...correction.notes},completed={};document.querySelectorAll('[data-done]').forEach(x=>completed[x.dataset.done]=x.checked);return {groupOverride:groupNum($('editGroup')?.value ?? (correction.groupOverride ?? submission.group)),status:$('correctionStatus').value,grade:$('grade').value===''?null:Number($('grade').value),general:$('generalText').value,notes,completed}}
 async function saveReview(){if(!currentCanEdit)return false;const data=payload();if(!data.groupOverride){$('saveMessage').textContent='Indicá un número de grupo válido.';return false}if(data.status==='terminado'&&!data.grade){$('saveMessage').textContent='Para finalizar debés indicar una nota del 1 al 10.';return false}const b=$('saveCorrection'),restoreBusy=exitTarget===null?busyButton(b,'Guardando…'):()=>{};$('saveMessage').textContent='';try{const d=await api('saveCorrection',{id:current,correction:data});correction=d.correction;states[current]=correction;const work=allWorks.find(w=>w.id===current);if(work)work.group=data.groupOverride;updateGroups();dirty=false;$('saveMessage').textContent='Corrección guardada';editing=false;const savedScroll=$('readerScroll').scrollTop;paintReader();$('readerScroll').scrollTop=savedScroll;$('reviewState').textContent=correctionStatus(correction)==='terminado'?`Terminado · Nota ${correction.grade}/10`:correctionStatus(correction)==='en_proceso'?'En proceso':'Por corregir';return true}catch(e){$('saveMessage').textContent=e.message;return false}finally{restoreBusy()}}
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
-function compiled(c){return Object.entries(c.notes||{}).filter(([k,v])=>String(v||'').trim()).map(([k,v])=>`${labels[k]||(k.startsWith('subsection_')?'Marco teórico · '+k:k)}\n${v}`).join('\n\n')}
+function compiled(c){return Object.entries(c.notes||{}).map(([k,v])=>{const items=parseComments(v);return items.filter(x=>x.text?.trim()).map(x=>`${labels[k]||(k.startsWith('subsection_')?'Marco teórico · '+k:k)}\n${x.quote?'Fragmento: «'+x.quote+'»\n':''}${x.text}`).join('\n\n')}).filter(Boolean).join('\n\n────────────\n\n')}
 function exportRows(){return visible().map(w=>{const c=states[w.id]||{};return [w.commission,effectiveGroup(w),w.student,c.grade??'',c.general||'',compiled(c)]})}
 const headers=['Docente','Número de grupo','Alumno','Nota','Observaciones generales','Observaciones parciales compiladas'];
 function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000)}
