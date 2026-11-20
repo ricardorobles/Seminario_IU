@@ -76,7 +76,7 @@ button.is-busy:before{content:'◌';display:inline-block;margin-right:6px;animat
 .comment-card p{white-space:pre-wrap;margin:8px 0}.comment-card button{padding:5px 8px;font-size:10px;margin-right:5px}
 .comment-toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:8px 0}.comment-toolbar button{font-size:11px}
 .comment-compose{background:#f4f7ff;border:1px solid #aac1fa;border-radius:8px;padding:10px;margin:8px 0}
-.comment-compose textarea{min-height:85px}.comment-compose .quote{font-size:11px;color:#45618a}
+.title-content{user-select:text;cursor:text}.title-review .reading-box h1{margin:0}.comment-compose textarea{min-height:85px}.comment-compose .quote{font-size:11px;color:#45618a}
 </style></head><body>
 <header><div><h1>Seminarios IU · Panel docente</h1><span class="muted">Entregas 2026 · corrección y atlas de casos</span></div><div class="right"><span id="userLabel" class="muted"></span><a href="index.html">Editor de estudiantes</a><button id="logout" class="secondary hidden">Cerrar sesión</button></div></header>
 <div id="login" class="login-card"><h2>Acceso docente</h2><p class="muted">Ingresá tus credenciales asignadas. Las entregas y correcciones no son públicas.</p><form id="loginForm"><label for="username">Usuario</label><input id="username" required autocomplete="username"><label for="password">Contraseña</label><input id="password" type="password" required autocomplete="current-password"><div class="actions"><button type="submit">Ingresar</button></div></form><p class="error" id="loginError" aria-live="polite"></p></div>
@@ -286,12 +286,12 @@ function parseComments(value){
  return [{id:'legacy',quote:'',text:String(value),author:'Observación anterior',date:'',legacy:true}];
 }
 function commentsFor(key){return parseComments(correction.notes?.[key]);}
-function commentsHTML(key){return commentsFor(key).map(c=>`<article class="comment-card" data-comment-id="${esc(c.id)}" data-comment-key="${esc(key)}"><div><span class="author">${esc(c.author||'Docente')}</span><span class="date">${esc(c.date||'')}</span></div>${c.quote?`<div class="quote">“${esc(c.quote)}”</div>`:''}<p>${esc(c.text)}</p>${editing?`<button type="button" class="secondary" data-edit-comment="${esc(c.id)}">Editar</button><button type="button" class="secondary" data-delete-comment="${esc(c.id)}">Eliminar</button>`:''}</article>`).join('');}
-function sectionComments(key){return `<div class="comment-toolbar">${editing?'<button type="button" class="secondary" data-add-comment>+ Comentar selección</button>':''}<span class="muted">${commentsFor(key).length} comentario(s)</span></div><div class="comment-list">${commentsHTML(key)||'<span class="no-note">Sin comentarios</span>'}</div><div class="comment-compose hidden"><div class="quote"></div><textarea placeholder="Escribí el comentario sobre el fragmento seleccionado"></textarea><div class="actions"><button type="button" data-publish-comment>Publicar</button><button type="button" class="secondary" data-cancel-comment>Cancelar</button></div></div>`;}
+function commentsHTML(key,onlyDocumentTitle=false){return commentsFor(key).filter(c=>onlyDocumentTitle?c.target==='document_title':c.target!=='document_title').map(c=>`<article class="comment-card" data-comment-id="${esc(c.id)}" data-comment-key="${esc(key)}"><div><span class="author">${esc(c.author||'Docente')}</span><span class="date">${esc(c.date||'')}</span></div>${c.quote?`<div class="quote">“${esc(c.quote)}”</div>`:''}<p>${esc(c.text)}</p>${editing?`<button type="button" class="secondary" data-edit-comment="${esc(c.id)}">Editar</button><button type="button" class="secondary" data-delete-comment="${esc(c.id)}">Eliminar</button>`:''}</article>`).join('');}
+function sectionComments(key,onlyDocumentTitle=false){const count=commentsFor(key).filter(c=>onlyDocumentTitle?c.target==='document_title':c.target!=='document_title').length;return `<div class="comment-toolbar">${editing?'<button type="button" class="secondary" data-add-comment>+ Comentar selección</button>':''}<span class="muted">${count} comentario(s)</span></div><div class="comment-list">${commentsHTML(key,onlyDocumentTitle)||'<span class="no-note">Sin comentarios</span>'}</div><div class="comment-compose hidden"><div class="quote"></div><textarea placeholder="Escribí el comentario sobre el fragmento seleccionado"></textarea><div class="actions"><button type="button" data-publish-comment>Publicar</button><button type="button" class="secondary" data-cancel-comment>Cancelar</button></div></div>`;}
 function textOffset(root,node,offset){const r=document.createRange();r.selectNodeContents(root);r.setEnd(node,offset);return r.toString().length;}
-function highlightComments(root,items){
+function highlightComments(root,items,target="body"){
  // Recorrer de atrás hacia adelante para conservar offsets del texto original.
- const valid=items.filter(c=>Number.isInteger(c.start)&&Number.isInteger(c.end)&&c.end>c.start).sort((a,b)=>b.start-a.start);
+ const valid=items.filter(c=>(c.target||"body")===target&&Number.isInteger(c.start)&&Number.isInteger(c.end)&&c.end>c.start).sort((a,b)=>b.start-a.start);
  for(const c of valid){
   const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let n,pos=0,start=null,end=null;
   while(n=walker.nextNode()){const next=pos+n.textContent.length;if(start===null&&c.start>=pos&&c.start<next)start=[n,c.start-pos];if(c.end>pos&&c.end<=next){end=[n,c.end-pos];break}pos=next;}
@@ -303,12 +303,16 @@ function highlightComments(root,items){
 const selectedCommentRanges=new WeakMap();
 function rememberCommentSelection(section){
  if(!editing)return;
- const root=section.querySelector('.text-content'),sel=window.getSelection();
- if(!root||!sel||sel.isCollapsed||!sel.rangeCount)return;
+ const sel=window.getSelection();
+ if(!sel||sel.isCollapsed||!sel.rangeCount)return;
  const range=sel.getRangeAt(0);
- if(!root.contains(range.startContainer)||!root.contains(range.endContainer))return;
+ // Los títulos y el cuerpo son raíces independientes; nunca mezclar offsets.
+ const roots=[...section.querySelectorAll('.title-content,.text-content')];
+ const root=roots.find(node=>node.contains(range.startContainer)&&node.contains(range.endContainer));
+ if(!root)return;
+ const target=root.classList.contains('title-content')?(section.dataset.titleOnly==='1'?'document_title':'title'):'body';
  selectedCommentRanges.set(section,{
-  quote:range.toString(),
+  quote:range.toString(),target,
   start:textOffset(root,range.startContainer,range.startOffset),
   end:textOffset(root,range.endContainer,range.endOffset)
  });
@@ -318,10 +322,13 @@ function setupComments(){
  document.querySelectorAll('.section').forEach(section=>{
   if(section.dataset.commentsBound==='1')return;
   section.dataset.commentsBound='1';
-  const root=section.querySelector('.text-content');
-  highlightComments(root,commentsFor(section.dataset.key));
-  root.addEventListener('mouseup',()=>rememberCommentSelection(section));
-  root.addEventListener('keyup',()=>rememberCommentSelection(section));
+  const roots=section.querySelectorAll('.text-content,.title-content');
+  roots.forEach(root=>{
+   const target=root.classList.contains('title-content')?(section.dataset.titleOnly==='1'?'document_title':'title'):'body';
+   highlightComments(root,commentsFor(section.dataset.key),target);
+   root.addEventListener('mouseup',()=>rememberCommentSelection(section));
+   root.addEventListener('keyup',()=>rememberCommentSelection(section));
+  });
   // Delegación: el panel de lectura y el de edición tienen botones independientes.
   section.addEventListener('click',event=>{
    const button=event.target.closest('button');
@@ -357,7 +364,7 @@ function startComment(section,id=null){
   rememberCommentSelection(section);
   const selection=selectedCommentRanges.get(section);
   if(!selection||!selection.quote.trim()||selection.end<=selection.start){
-   alert('Seleccioná primero un fragmento del texto de este apartado.');return;
+   alert('Seleccioná primero un fragmento del título o del texto de este apartado.');return;
   }
   draft={id:'c'+Date.now()+'_'+Math.random().toString(36).slice(2,7),...selection};
  }
@@ -381,12 +388,24 @@ function publishComment(section,compose){
 }
 function refreshSectionComments(section){
  const key=section.dataset.key;
- for(const panel of section.querySelectorAll('.review-view,.review-box')){
-  const holder=panel.querySelector('.comment-content');if(holder)holder.innerHTML=sectionComments(key);
- }
- const root=section.querySelector('.text-content');
- root.innerHTML=rich(makeSections(submission).find(s=>s.key===key)?.text);
- highlightComments(root,commentsFor(key));
+ // El título general comparte la clave de almacenamiento con Resumen, pero
+ // tiene su propio panel y un destino independiente para sus anotaciones.
+ document.querySelectorAll('.section').forEach(part=>{
+  if(part.dataset.key!==key)return;
+  const titleOnly=part.dataset.titleOnly==='1';
+  for(const panel of part.querySelectorAll('.review-view,.review-box')){
+   const holder=panel.querySelector('.comment-content');
+   if(holder)holder.innerHTML=sectionComments(key,titleOnly);
+  }
+  const data=makeSections(submission).find(s=>s.key===key);
+  const titleRoot=part.querySelector('.title-content');
+  if(titleRoot){
+   titleRoot.textContent=titleOnly?String(submission.fields?.title||''):data?.title||'';
+   highlightComments(titleRoot,commentsFor(key),titleOnly?'document_title':'title');
+  }
+  const bodyRoot=part.querySelector('.text-content');
+  if(bodyRoot){bodyRoot.innerHTML=rich(data?.text);highlightComments(bodyRoot,commentsFor(key),'body');}
+ });
  updateCompiled();
 }
 
@@ -394,8 +413,8 @@ function makeSections(d){const fields=d.fields||{},titles=d.caseTitles||{},secti
 async function openWork(id,sourceButton=null){const restore=busyButton(sourceButton,sourceButton?.id==='next'||sourceButton?.id==='prev'?'Cambiando de trabajo…':'Abriendo entrega…');try{const r=await api('get',{id});current=id;submission=r.submission;correction=r.correction||{status:'pendiente',grade:null,notes:{},completed:{},general:''};currentCanEdit=!!r.canEdit;dirty=false;editing=false;$('review').classList.remove('hidden');paintReader();updateNav();}catch(e){alert('No se pudo abrir: '+e.message)}finally{restore()}}
 function paintReader(){
  const d=submission,sections=makeSections(d),effectiveCurrentGroup=groupNum(correction.groupOverride ?? d.group);
- $('readerPaper').innerHTML=`<h1>${esc(String(d.fields?.title||''))}</h1><p class="muted">${esc(d.student)} · ${esc(d.commission)} · Grupo ${esc(effectiveCurrentGroup)} · 2026</p>`+(editing?`<div class="group-editor"><label for="editGroup">Número de grupo<input id="editGroup" inputmode="numeric" maxlength="7" value="${esc(effectiveCurrentGroup)}" placeholder="Ej. 24"></label><span class="muted">La corrección modifica el grupo usado en el panel y las exportaciones, sin alterar el JSON original del estudiante.</span></div>`:'')+
- sections.map((s,i)=>{const done=!!correction.completed?.[s.key];return `<section class="section" id="part-${i}" data-key="${esc(s.key)}"><div class="reading-box"><h2>${esc(s.title)}</h2><div class="text-content">${rich(s.text)}</div></div><div class="review-view ${editing?'hidden':''}"><span class="review-label">Comentarios del apartado ${done?'<span class="mark">✓ Corregido</span>':''}</span><div class="comment-content">${sectionComments(s.key)}</div></div><div class="review-box ${editing?'':'hidden'}"><label><input style="width:auto" type="checkbox" data-done="${esc(s.key)}" ${done?'checked':''}> Apartado corregido</label><div class="comment-content">${sectionComments(s.key)}</div></div></section>`}).join('')+
+ $('readerPaper').innerHTML=`<section class="section title-review" id="document-title" data-key="abstract" data-title-only="1"><div class="reading-box"><h1 class="title-content">${esc(String(d.fields?.title||''))}</h1></div><div class="review-view ${editing?'hidden':''}"><span class="review-label">Comentarios del título general</span><div class="comment-content">${sectionComments('abstract',true)}</div></div><div class="review-box ${editing?'':'hidden'}"><span class="review-label">Comentarios del título general</span><div class="comment-content">${sectionComments('abstract',true)}</div></div></section><p class="muted">${esc(d.student)} · ${esc(d.commission)} · Grupo ${esc(effectiveCurrentGroup)} · 2026</p>`+(editing?`<div class="group-editor"><label for="editGroup">Número de grupo<input id="editGroup" inputmode="numeric" maxlength="7" value="${esc(effectiveCurrentGroup)}" placeholder="Ej. 24"></label><span class="muted">La corrección modifica el grupo usado en el panel y las exportaciones, sin alterar el JSON original del estudiante.</span></div>`:'')+
+ sections.map((s,i)=>{const done=!!correction.completed?.[s.key];return `<section class="section" id="part-${i}" data-key="${esc(s.key)}"><div class="reading-box"><h2 class="title-content">${esc(s.title)}</h2><div class="text-content">${rich(s.text)}</div></div><div class="review-view ${editing?'hidden':''}"><span class="review-label">Comentarios del apartado ${done?'<span class="mark">✓ Corregido</span>':''}</span><div class="comment-content">${sectionComments(s.key)}</div></div><div class="review-box ${editing?'':'hidden'}"><label><input style="width:auto" type="checkbox" data-done="${esc(s.key)}" ${done?'checked':''}> Apartado corregido</label><div class="comment-content">${sectionComments(s.key)}</div></div></section>`}).join('')+
  `<section id="general"><h2>Observaciones y calificación</h2><div class="read-general ${editing?'hidden':''}"><h3>Observaciones generales</h3><p>${esc(correction.general||'Sin observaciones generales registradas')}</p><h3>Observaciones parciales compiladas</h3><p>${esc(compiled(correction)||'Sin observaciones parciales registradas')}</p><p class="meta">Estado: ${correctionStatus(correction)==='terminado'?'Terminado de corregir':correctionStatus(correction)==='en_proceso'?'En proceso':'Por corregir'} · Nota: ${correction.grade?esc(correction.grade)+'/10':'Sin nota'}</p></div><div id="generalEditor" class="${editing?'':'hidden'}"><div class="general-cols"><div><label>Observaciones generales</label><textarea id="generalText">${esc(correction.general||'')}</textarea></div><div><label>Observaciones parciales compiladas</label><textarea id="compiled" readonly></textarea></div></div><div class="review-controls"><label>Nota (1 a 10)<select id="grade"><option value="">Sin nota</option>${Array.from({length:10},(_,i)=>`<option value="${i+1}" ${Number(correction.grade)===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label><label>Estado<select id="correctionStatus"><option value="en_proceso" ${correction.status==='terminado'?'':'selected'}>En proceso</option><option value="terminado" ${correction.status==='terminado'?'selected':''}>Terminado de corregir</option></select></label><button id="saveCorrection">Guardar corrección</button><span id="saveMessage" role="status"></span></div></div></section>`;
  $('tocLinks').innerHTML='<a href="#readerTop" id="tocTop">Inicio</a>'+sections.map((s,i)=>`<a href="#part-${i}" data-check="${esc(s.key)}" class="${s.key==='intro'?'section-parent':s.key.startsWith('subsection_')?'section-sub':''}"><span class="toc-tick" aria-hidden="true"></span><span>${esc(s.title)}</span></a>`).join('')+'<div class="toc-divider"></div><a href="#general" id="tocGeneral">Observaciones generales</a>';
  $('tocTop').onclick=e=>{e.preventDefault();$('readerScroll').scrollTop=0};$('tocLinks').querySelectorAll('a[href^="#part"]').forEach(a=>a.onclick=e=>{e.preventDefault();$(a.hash.slice(1)).scrollIntoView({behavior:'smooth'})});$('tocGeneral').onclick=e=>{e.preventDefault();$('general').scrollIntoView({behavior:'smooth'})};
@@ -464,7 +483,7 @@ $('saveExit').onclick=async()=>{
 function payload(){const notes={...correction.notes},completed={};document.querySelectorAll('[data-done]').forEach(x=>completed[x.dataset.done]=x.checked);return {groupOverride:groupNum($('editGroup')?.value ?? (correction.groupOverride ?? submission.group)),status:$('correctionStatus').value,grade:$('grade').value===''?null:Number($('grade').value),general:$('generalText').value,notes,completed}}
 async function saveReview(){if(!currentCanEdit)return false;const data=payload();if(!data.groupOverride){$('saveMessage').textContent='Indicá un número de grupo válido.';return false}if(data.status==='terminado'&&!data.grade){$('saveMessage').textContent='Para finalizar debés indicar una nota del 1 al 10.';return false}const b=$('saveCorrection'),restoreBusy=exitTarget===null?busyButton(b,'Guardando…'):()=>{};$('saveMessage').textContent='';try{const d=await api('saveCorrection',{id:current,correction:data});correction=d.correction;states[current]=correction;const work=allWorks.find(w=>w.id===current);if(work)work.group=data.groupOverride;updateGroups();dirty=false;$('saveMessage').textContent='Corrección guardada';editing=false;const savedScroll=$('readerScroll').scrollTop;paintReader();$('readerScroll').scrollTop=savedScroll;$('reviewState').textContent=correctionStatus(correction)==='terminado'?`Terminado · Nota ${correction.grade}/10`:correctionStatus(correction)==='en_proceso'?'En proceso':'Por corregir';return true}catch(e){$('saveMessage').textContent=e.message;return false}finally{restoreBusy()}}
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
-function compiled(c){return Object.entries(c.notes||{}).map(([k,v])=>{const items=parseComments(v);return items.filter(x=>x.text?.trim()).map(x=>`${labels[k]||(k.startsWith('subsection_')?'Marco teórico · '+k:k)}\n${x.quote?'Fragmento: «'+x.quote+'»\n':''}${x.text}`).join('\n\n')}).filter(Boolean).join('\n\n────────────\n\n')}
+function compiled(c){return Object.entries(c.notes||{}).map(([k,v])=>{const items=parseComments(v);return items.filter(x=>x.text?.trim()).map(x=>`${x.target==='document_title'?'Título general':labels[k]||(k.startsWith('subsection_')?'Marco teórico · '+k:k)}${x.target==='title'?' · Título del apartado':''}\n${x.quote?'Fragmento: «'+x.quote+'»\n':''}${x.text}`).join('\n\n')}).filter(Boolean).join('\n\n────────────\n\n')}
 function exportRows(){return visible().map(w=>{const c=states[w.id]||{};return [w.commission,effectiveGroup(w),w.student,c.grade??'',c.general||'',compiled(c)]})}
 const headers=['Docente','Número de grupo','Alumno','Nota','Observaciones generales','Observaciones parciales compiladas'];
 function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000)}
